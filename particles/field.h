@@ -1,4 +1,25 @@
 #pragma once
+/*
+ * This file is part of Vlasiator.
+ * Copyright 2010-2016 Finnish Meteorological Institute
+ *
+ * For details of usage, see the COPYING file and read the "Rules of the Road"
+ * at http://vlasiator.fmi.fi/
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <vector>
 #include "vectorclass.h"
 #include "vector3d.h"
@@ -53,7 +74,7 @@ struct Field
    }
 
    // Round-Brace indexing: indexing by physical location, with interpolation
-   Vec3d operator()(Vec3d v) {
+   virtual Vec3d operator()(Vec3d v) {
       Vec3d vmin,vdx;
       double min[3] = { min[0] = dimension[0]->min, dimension[1]->min, dimension[2]->min};
       vmin.load(min);
@@ -65,7 +86,7 @@ struct Field
       int index[3];
       double fract[3];
       truncate_to_int(v).store(index);
-      (v-truncate(v)).store(fract);
+      (v-Vec3d(truncate(v))).store(fract);
 
       if(dimension[2]->cells <= 1) {
          // Equatorial plane
@@ -119,7 +140,7 @@ struct Field
 
 // Linear Temporal interpolation between two input fields
 struct Interpolated_Field : Field{
-   Field& a,b;
+   Field &a, &b;
    double t;
 
    /* Constructor:
@@ -129,7 +150,7 @@ struct Interpolated_Field : Field{
    Interpolated_Field(Field& _a, Field& _b, float _t) : a(_a),b(_b),t(_t) {
    }
 
-   Vec3d operator()(Vec3d v) {
+   virtual Vec3d operator()(Vec3d v) {
       Vec3d aval=a(v);
       Vec3d bval=b(v);
 
