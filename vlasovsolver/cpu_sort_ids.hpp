@@ -14,16 +14,16 @@ template<typename ID> inline bool paircomparator( const std::pair<ID, ID> & l, c
 
 
 
-template<typename ID, typename LENGTH> inline bool sortIds(const ID id, 
+template<typename ID, typename LENGTH> inline bool sortIds(const uint dimension, 
                                                            const LENGTH meshSize, 
                                                            std::vector<ID>& ids)
 {
    
-   std::vector< std::pair<ID, ID>> sortedIds(ids.size);
+  std::vector< std::pair<ID, ID>> sortedIds(ids.size());
    
    //TODO conditionally parallel version?
 #pragma omp parallel for
-   for (uint i = 0; i < Ids.size() ; ++i ) {
+   for (uint i = 0; i < ids.size() ; ++i ) {
       const ID id = ids[i];
 
       switch( dimension ) {
@@ -43,7 +43,7 @@ template<typename ID, typename LENGTH> inline bool sortIds(const ID id,
           // Mapping the block id to different coordinate system if dimension is not zero:
           const ID idMapped = id - (x_index + y_index*meshSize[0]) + y_index + x_index * meshSize[1];
           
-          sortedIds[i] = std::make_pair( idMapped, block );
+          sortedIds[i] = std::make_pair( idMapped, id );
        }
          break;
        case 2: {
@@ -70,8 +70,8 @@ template<typename ID, typename LENGTH> inline bool sortIds(const ID id,
    }
    // Finally, sort the list and store the sorted blocks in ids
    std::sort( sortedIds.begin(), sortedIds.end(), paircomparator<ID> );
-   for (uint i = 0; i < Ids.size() ; ++i ) {
-      ids[i] = sortedIds[i].first();
+   for (uint i = 0; i < ids.size() ; ++i ) {
+      ids[i] = sortedIds[i].second;
    }
    
 }
