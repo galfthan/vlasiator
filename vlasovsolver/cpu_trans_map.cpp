@@ -31,6 +31,7 @@
 #include "../grid.h"
 #include "../object_wrapper.h"
 #include "vec.h"
+#include "cpu_sort_ids.hpp"
 #include "cpu_1d_plm.hpp"
 #include "cpu_1d_ppm.hpp"
 #include "cpu_1d_pqm.hpp"
@@ -336,7 +337,7 @@ inline void copy_trans_block_data(
    refion). It is safe as each thread only computes certain blocks (blockID%tnum_threads = thread_num */
 
 bool trans_map_1d(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
-                  const vector<CellID>& localPropagatedCells,
+		  const vector<CellID>& localPropagatedCells,
                   const vector<CellID>& remoteTargetCells,
                   const uint dimension,
                   const Realv dt,
@@ -349,14 +350,20 @@ bool trans_map_1d(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
 
    if(localPropagatedCells.size() == 0) 
       return true; 
+
+   std::vector<CellID> sortedLocalPropagatedCells(localPropagatedCells);
+
+   sortIds< CellID, dccrg::Grid_Length::type >(dimension, mpiGrid.mapping.length.get(), sortedLocalPropagatedCells);
+
+
 //vector with all cells
-   vector<CellID> allCells(localPropagatedCells);
+   vector<CellID> allCells(sortedLocalPropagatedCells);
    allCells.insert(allCells.end(), remoteTargetCells.begin(), remoteTargetCells.end());
    
    const uint nSourceNeighborsPerCell = 1 + 2 * VLASOV_STENCIL_WIDTH;
    std::vector<SpatialCell*> allCellsPointer(allCells.size());
-   std::vector<SpatialCell*> sourceNeighbors(localPropagatedCells.size() * nSourceNeighborsPerCell);
-   std::vector<SpatialCell*> targetNeighbors(3 * localPropagatedCells.size() );
+   std::vector<SpatialCell*> sourceNeighbors(sortedLocalPropagatedCells.size() * nSourceNeighborsPerCell);
+   std::vector<SpatialCell*> targetNeighbors(3 * sortedLocalPropagatedCells.size() );
 
    
 #pragma omp parallel for
@@ -366,14 +373,14 @@ bool trans_map_1d(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
    
    
 #pragma omp parallel for
-   for(uint celli = 0; celli < localPropagatedCells.size(); celli++){         
+   for(uint celli = 0; celli < sortedLocalPropagatedCells.size(); celli++){         
          // compute spatial neighbors, separately for targets and source. In
          // source cells we have a wider stencil and take into account
          // boundaries. For targets we only have actual cells as we do not
          // want to propagate boundary cells (array may contain
          // INVALID_CELLIDs at boundaries).
-      compute_spatial_source_neighbors(mpiGrid, localPropagatedCells[celli], dimension, sourceNeighbors.data() + celli * nSourceNeighborsPerCell);
-      compute_spatial_target_neighbors(mpiGrid, localPropagatedCells[celli], dimension, targetNeighbors.data() + celli * 3);
+      compute_spatial_source_neighbors(mpiGrid, sortedLocalPropagatedCells[celli], dimension, sourceNeighbors.data() + celli * nSourceNeighborsPerCell);
+      compute_spatial_target_neighbors(mpiGrid, sortedLocalPropagatedCells[celli], dimension, targetNeighbors.data() + celli * 3);
    }
 
    
@@ -462,8 +469,8 @@ bool trans_map_1d(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
    
 #pragma omp parallel 
    {      
-      std::vector<Realf> targetBlockData(3 * localPropagatedCells.size() * WID3);
-      std::vector<bool> targetsValid(localPropagatedCells.size());
+      std::vector<Realf> targetBlockData(3 * sortedLocalPropagatedCells.size() * WID3);
+      std::vector<bool> targetsValid(sortedLocalPropagatedCells.size());
       std::vector<vmesh::LocalID> allCellsBlockLocalID(allCells.size());
 
       
@@ -478,9 +485,9 @@ bool trans_map_1d(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
          }
 
       
-         for(uint celli = 0; celli < localPropagatedCells.size(); celli++){
+         for(uint celli = 0; celli < sortedLocalPropagatedCells.size(); celli++){
             SpatialCell *spatial_cell = allCellsPointer[celli];
-            const CellID cellID =  localPropagatedCells[celli];
+            const CellID cellID =  sortedLocalPropagatedCells[celli];
             const vmesh::LocalID blockLID = allCellsBlockLocalID[celli];
             
             //Reset list of valid targets, will be set to true later for those
@@ -610,7 +617,7 @@ bool trans_map_1d(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
          }
       
          //store values from target_values array to the actual blocks
-         for(uint celli = 0; celli < localPropagatedCells.size(); celli++){
+         for(uint celli = 0; celli < sortedLocalPropagatedCells.size(); celli++){
             if(targetsValid[celli]) {
                for(uint ti = 0; ti < 3; ti++) {
                   SpatialCell* spatial_cell = targetNeighbors[celli * 3 + ti];
