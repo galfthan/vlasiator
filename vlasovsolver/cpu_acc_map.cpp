@@ -26,7 +26,7 @@
 #include <utility>
 
 #include "vec.h"
-#include "cpu_acc_sort_blocks.hpp"
+#include "cpu_sort_ids.hpp"
 #include "cpu_acc_load_blocks.hpp"
 #include "cpu_1d_pqm.hpp"
 #include "cpu_1d_ppm.hpp"
@@ -189,17 +189,23 @@ bool map_1d(SpatialCell* spatial_cell,
    const Realv i_dv=1.0/dv;
 
    // sort blocks according to dimension, and divide them into columns
-   vmesh::LocalID* blocks = new vmesh::LocalID[vmesh.size()];
    std::vector<uint> columnBlockOffsets;
    std::vector<uint> columnNumBlocks;
    std::vector<uint> setColumnOffsets;
    std::vector<uint> setNumColumns;
    std::vector<int> columnMinBlockK;
    std::vector<int> columnMaxBlockK;
+
+   std::vector< vmesh::GlobalID>  blocks(vmesh.getGrid());
    
-   sortBlocklistByDimension(vmesh, dimension, blocks,
-                            columnBlockOffsets, columnNumBlocks,
-                            setColumnOffsets, setNumColumns);
+   sortIdListByDimension<vmesh::GlobalID, vmesh::LocalID*>(dimension, 
+                                                           vmesh.getGridLength(REFLEVEL), 
+                                                           blocks,
+                                                           columnBlockOffsets, 
+                                                           columnNumBlocks,
+                                                           setColumnOffsets, 
+                                                           setNumColumns);                                                           
+
    
    // loop over block column sets  (all columns along the dimension with the other dimensions being equal )
       
