@@ -338,7 +338,6 @@ inline void copy_trans_block_data(
 
 bool trans_map_1d(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
 		  const vector<CellID>& localPropagatedCells,
-                  const vector<CellID>& remoteTargetCells,
                   const uint dimension,
                   const Realv dt,
                   const int& popID) {
@@ -351,25 +350,29 @@ bool trans_map_1d(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
    if(localPropagatedCells.size() == 0) 
       return true; 
 
-   std::vector<CellID> sortedLocalPropagatedCells(localPropagatedCells);
-
-   sortIds< CellID, dccrg::Grid_Length::type >(dimension, mpiGrid.mapping.length.get(), sortedLocalPropagatedCells);
-
 
 //vector with all cells
-   vector<CellID> allCells(sortedLocalPropagatedCells);
-   allCells.insert(allCells.end(), remoteTargetCells.begin(), remoteTargetCells.end());
    
-   const uint nSourceNeighborsPerCell = 1 + 2 * VLASOV_STENCIL_WIDTH;
-   std::vector<SpatialCell*> allCellsPointer(allCells.size());
-   std::vector<SpatialCell*> sourceNeighbors(sortedLocalPropagatedCells.size() * nSourceNeighborsPerCell);
-   std::vector<SpatialCell*> targetNeighbors(3 * sortedLocalPropagatedCells.size() );
 
+   sortIds
+
+   std::vector<uint> columnCellOffsets;
+   std::vector<uint> columnNumCells;
+   std::vector<uint> setColumnOffsets;
+   std::vector<uint> setNumColumns;
    
-#pragma omp parallel for
-   for(uint celli = 0; celli < allCells.size(); celli++){         
-      allCellsPointer[celli] = mpiGrid[allCells[celli]];
-   }
+
+   sortIdListByDimension< CellID, dccrg::Grid_Length::type >(dimension, 
+                                                             mpiGrid.mapping.length.get(),
+                                                             localPropagatedCells,
+                                                             columnCellOffsets, 
+                                                             columnNumCells,
+                                                             setColumnOffsets, 
+                                                             setNumColumns);                                                           
+
+   //source values
+   Vec values[ (MAX_CELLS_PER_DIM +  2 * VLASOV_STENCIL_WIDTH ) * WID3 / VECL];
+   // TODO CONTINUE HERE
    
    
 #pragma omp parallel for
