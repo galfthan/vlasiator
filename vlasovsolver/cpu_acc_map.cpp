@@ -197,17 +197,28 @@ bool map_1d(SpatialCell* spatial_cell,
    std::vector<int> columnMaxBlockK;
 
    std::vector< vmesh::GlobalID>  blocks(vmesh.getGrid());
+   /*
+template<typename ID, typename LENGTH> 
+void sortIdlistByDimension( //const spatial_cell::SpatialCell* spatial_cell,
+   const uint dimension, 
+   const LENGTH meshSize, 
+   std::vector<ID>& ids,
+   std::vector<uint> & columnIdOffsets,
+   std::vector<uint> & columnNumIds,
+   std::vector<uint> & setColumnOffsets,
+   std::vector<uint> & setNumColumns) {
+   */
+   const vmesh::LocalID* gridLength = vmesh.getGridLength(REFLEVEL);
+   sortIdlistByDimension<vmesh::GlobalID, const vmesh::LocalID* >(dimension, 
+							    gridLength,
+							    blocks,
+							    columnBlockOffsets, 
+							    columnNumBlocks,
+							    setColumnOffsets, 
+							    setNumColumns);                                                           
    
-   sortIdListByDimension<vmesh::GlobalID, vmesh::LocalID*>(dimension, 
-                                                           vmesh.getGridLength(REFLEVEL), 
-                                                           blocks,
-                                                           columnBlockOffsets, 
-                                                           columnNumBlocks,
-                                                           setColumnOffsets, 
-                                                           setNumColumns);                                                           
-
    
-   // loop over block column sets  (all columns along the dimension with the other dimensions being equal )
+   // loop iover block column sets  (all columns along the dimension with the other dimensions being equal )
       
 /*   
      values array used to store column data The max size is the worst
@@ -234,7 +245,7 @@ bool map_1d(SpatialCell* spatial_cell,
       uint valuesColumnOffset = 0; //offset to values array for data in a column in this set
       for(uint columnIndex = setColumnOffsets[setIndex]; columnIndex < setColumnOffsets[setIndex] + setNumColumns[setIndex] ; columnIndex ++){
          const vmesh::LocalID n_cblocks = columnNumBlocks[columnIndex];
-         vmesh::GlobalID* cblocks = blocks + columnBlockOffsets[columnIndex]; //column blocks
+         vmesh::GlobalID* cblocks = blocks.data() + columnBlockOffsets[columnIndex]; //column blocks
          loadColumnBlockData(vmesh, blockContainer, cblocks, n_cblocks, dimension, values + valuesColumnOffset);
          valuesColumnOffset += (n_cblocks + 2) * (WID3/VECL); // there are WID3/VECL elements of type Vec per block
       }
@@ -286,7 +297,7 @@ bool map_1d(SpatialCell* spatial_cell,
       //now, record which blocks are target blocks
       for(uint columnIndex = setColumnOffsets[setIndex]; columnIndex < setColumnOffsets[setIndex] + setNumColumns[setIndex] ; columnIndex ++){
          const vmesh::LocalID n_cblocks = columnNumBlocks[columnIndex];
-         vmesh::GlobalID* cblocks = blocks + columnBlockOffsets[columnIndex]; //column blocks
+         vmesh::GlobalID* cblocks = blocks.data() + columnBlockOffsets[columnIndex]; //column blocks
          velocity_block_indices_t firstBlockIndices;
          velocity_block_indices_t lastBlockIndices;
          vmesh.getIndices(cblocks[0],
@@ -378,7 +389,7 @@ bool map_1d(SpatialCell* spatial_cell,
       valuesColumnOffset = 0; //offset to values array for data in a column in this set
       for(uint columnIndex = setColumnOffsets[setIndex]; columnIndex < setColumnOffsets[setIndex] + setNumColumns[setIndex] ; columnIndex ++){
          const vmesh::LocalID n_cblocks = columnNumBlocks[columnIndex];
-         vmesh::GlobalID* cblocks = blocks + columnBlockOffsets[columnIndex]; //column blocks
+         vmesh::GlobalID* cblocks = blocks.data() + columnBlockOffsets[columnIndex]; //column blocks
       
          // compute the common indices for this block column set
          //First block in column
@@ -566,7 +577,7 @@ bool map_1d(SpatialCell* spatial_cell,
       } //for loop over columns
       
    }
-   delete [] blocks;
+
    return true;
 }
 
