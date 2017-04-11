@@ -77,21 +77,18 @@ template<typename ID, typename LENGTH> inline bool sortIds(const uint dimension,
 
 
 
-template<typename ID, typename LENGTH> 
-void sortIdlistByDimension( //const spatial_cell::SpatialCell* spatial_cell,
-   const uint dimension, 
-   const LENGTH meshSize, 
-   std::vector<ID>& ids,
-   std::vector<uint> & columnIdOffsets,
-   std::vector<uint> & columnNumIds,
-   std::vector<uint> & setColumnOffsets,
-   std::vector<uint> & setNumColumns) {
-   
-   const uint nIds = ids.size();
+template<typename ID, typename LENGTH>  void sortIdlistByDimension(const uint dimension, const LENGTH meshSize, 
+								   std::vector<ID> & ids,
+								   std::vector<uint> & columnIdOffsets,
+								   std::vector<uint> & columnNumIds,
+								   std::vector<uint> & setColumnOffsets,
+								   std::vector<uint> & setNumColumns) {
+  
+  const uint nIds = ids.size();
 
    //sort Ids
    std::vector<std::pair<ID, ID> > sortedIdPairs;
-   sortIds<ID, LENGTH>sortIds(dimension, meshSize, ids, sortedIdPairs);
+   sortIds<ID, LENGTH>(dimension, meshSize, ids, sortedIdPairs);
    
    
    // Put in the sorted ids, and also compute column offsets and lengths:
