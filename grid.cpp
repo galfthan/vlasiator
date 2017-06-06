@@ -222,7 +222,7 @@ void initializeGrid(
       }
 
       for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
-         adjustVelocityBlocks(mpiGrid,cells,true,popID);
+         adjustVelocityBlocks(mpiGrid,cells,true, 2,popID);
          #ifdef DEBUG_AMR_VALIDATE
             writeVelMesh(mpiGrid);
             validateMesh(mpiGrid,popID);
@@ -460,6 +460,7 @@ void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, S
 bool adjustVelocityBlocks(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
                           const vector<CellID>& cellsToAdjust,
                           bool doPrepareToReceiveBlocks,
+                          int emptyBlockAction,
                           const uint popID) {
    phiprof::initializeTimer("re-adjust blocks","Block adjustment");
    phiprof::start("re-adjust blocks");
@@ -507,7 +508,7 @@ bool adjustVelocityBlocks(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& m
             density_pre_adjust += cell->get_data(popID)[i];
          }
       }
-      cell->adjust_velocity_blocks(neighbor_ptrs,popID);
+      cell->adjust_velocity_blocks(neighbor_ptrs,popID, emptyBlockAction);
 
       if (getObjectWrapper().particleSpecies[popID].sparse_conserve_mass) {
          for (size_t i=0; i<cell->get_number_of_velocity_blocks(popID)*WID3; ++i) {

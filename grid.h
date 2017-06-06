@@ -78,12 +78,14 @@ void deallocateRemoteCellBlocks(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geomet
  \param mpiGrid  Parallel grid with spatial cells
  \param cellsToAdjust  List of cells that are adjusted, that is cells which blocks are added or removed. 
  \param doPrepareToReceiveBlocks If true, then remote cells are set up so that velocity space data can be received. Global operation, value has to be the same for all processes.
- 
+ \param emptyBlockAction Action to perform on block to be removed 
+  
 */
 bool adjustVelocityBlocks(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
                           const std::vector<CellID>& cellsToAdjust,
                           bool doPrepareToReceiveBlocks,
-                            const uint popID);
+                          int emptyBlockAction,
+                          const uint popID);
 
 /*! Estimates memory consumption and writes it into logfile. Collective operation on MPI_COMM_WORLD
  * \param mpiGrid Spatial grid

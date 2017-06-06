@@ -102,13 +102,13 @@ namespace spatial_cell {
    /** Adds "important" and removes "unimportant" velocity blocks
     * to/from this cell.
     * 
-    * velocity_block_with_content_list needs to be up to date in local and remote cells.
+s    * velocity_block_with_content_list needs to be up to date in local and remote cells.
     * velocity_block_with_no_content_list needs to be up to date in local cells.
     *         
     * update_velocity_block_with_content_lists() should have
     * been called with the current distribution function values, and then the contetn list transferred.
     * 
-    * Removes all velocity blocks from this spatial cell which don't
+    * Performs emptyBlockAction on all velocity blocks from this spatial cell which don't
     * have content and don't have spatial or velocity neighbors with
     * content.  Adds neighbors for all velocity blocks which do have
     * content (including spatial neighbors).  All cells in
@@ -118,12 +118,15 @@ namespace spatial_cell {
     * per thread. We need the block_has_content vector from
     * neighbouring cells, but these are not written to here. We only
     * modify local cell.
+    *
+    * \par emptyBlockAction 0 = do nothing, 1 = remove, 2 = shift to coarser level
     * 
     * NOTE: The AMR mesh must be valid, otherwise this function will
     * remove some blocks that should not be removed.*/
    #ifndef AMR
+
    void SpatialCell::adjust_velocity_blocks(const std::vector<SpatialCell*>& spatial_neighbors,
-                                            const uint popID,bool doDeleteEmptyBlocks) {
+                                            const uint popID, int emptyBlockAction ) {
       #ifdef DEBUG_SPATIAL_CELL
       if (popID >= populations.size()) {
          std::cerr << "ERROR, popID " << popID << " exceeds populations.size() " << populations.size() << " in ";
@@ -132,6 +135,8 @@ namespace spatial_cell {
       }
       #endif
       
+
+
       //  This set contains all those cellids which have neighbors in any
       //  of the 6-dimensions Actually, we would only need to add
       //  local blocks with no content here, as blocks with content
@@ -175,7 +180,7 @@ namespace spatial_cell {
       // REMOVE all blocks in this cell without content + without neighbors with content
       // better to do it in the reverse order, as then blocks at the
       // end are removed first, and we may avoid copying extra data.
-      if (doDeleteEmptyBlocks) {
+      if (emptyBlockAction > 0) {
          for (int block_index= this->velocity_block_with_no_content_list.size()-1; block_index>=0; --block_index) {
             const vmesh::GlobalID blockGID = velocity_block_with_no_content_list[block_index];
             #ifdef DEBUG_SPATIAL_CELL
@@ -198,26 +203,75 @@ namespace spatial_cell {
 
             if (removeBlock == true) {
                //No content, and also no neighbor have content -> remove
-               //and increment rho loss counters
-               const Real* block_parameters = get_block_parameters(popID)+blockLID*BlockParams::N_VELOCITY_BLOCK_PARAMS;
-               const Real DV3 = block_parameters[BlockParams::DVX]
-                 * block_parameters[BlockParams::DVY]
-                 * block_parameters[BlockParams::DVZ];
-               Real sum=0;
-               for (unsigned int i=0; i<WID3; ++i) sum += get_data(popID)[blockLID*SIZE_VELBLOCK+i];
-               this->populations[popID].RHOMLOSSADJUST += DV3*sum*getObjectWrapper().particleSpecies[popID].mass;
-	       
-               // and finally remove block
-               this->remove_velocity_block(blockGID,popID);
-            }
+               if (emptyBlockAction == 1 || (
+                      emptyBlockAction == 2 && popID == populations.size()-1 )) {
+                  //Increment rho loss counters if last level
+                  
+                  const Real* block_parameters = get_block_parameters(popID)+blockLID*BlockParams::N_VELOCITY_BLOCK_PARAMS;
+                  const Real DV3 = block_parameters[BlockParams::DVX]
+                     * block_parameters[BlockParams::DVY]
+                     * block_parameters[BlockParams::DVZ];
+                  Real sum=0;
+                  for (unsigned int i=0; i<WID3; ++i) sum += get_data(popID)[blockLID*SIZE_VELBLOCK+i];
+                  this->populations[popID].RHOMLOSSADJUST += DV3*sum*getObjectWrapper().particleSpecies[popID].mass;
+               }
+               
+               if (emptyBlockAction == 2 && popID < populations.size()-1 ) {
+                  //HACK add mass to next level, unless it is last
+               
+                  const Real* block_parameters = get_block_parameters(popID) + blockLID * BlockParams::N_VELOCITY_BLOCK_PARAMS;
+                  const Real DV3 = block_parameters[BlockParams::DVX]
+                     * block_parameters[BlockParams::DVY]
+                     * block_parameters[BlockParams::DVZ];
+                  
+                  for (uint k=0; k<WID; ++k) for (uint j=0; j<WID; ++j) for (uint i=0; i<WID; ++i) {
+                           Real coords[3];
+                           coords[0] = block_parameters[BlockParams::VXCRD] + (i + 0.5) * block_parameters[BlockParams::DVX];
+                           coords[1] = block_parameters[BlockParams::VYCRD] + (j + 0.5) * block_parameters[BlockParams::DVY];
+                           coords[2] = block_parameters[BlockParams::VZCRD] + (k + 0.5) * block_parameters[BlockParams::DVZ];
+                           Realf numericalMass = get_data(popID)[blockLID * SIZE_VELBLOCK + cellIndex(i,j,k)] * DV3;
+                           //TODO, by knowing how these relate one could
+                           //instead of using coords directly compute how the
+                           //indices relate with some integer
+                           //arithmetics. Also one smaller block always maps
+                           //to just one larger, but we recompute this block
+                           //64 times anyway
+                           //=>this is far too slow and  just POC 
+                           const vmesh::GlobalID blockGID_next = get_velocity_block(popID + 1, coords, 0);
+                           vmesh::LocalID blockLID_next = get_velocity_block_local_id(blockGID_next,popID + 1);                              
+                           if (blockLID_next == invalid_local_id() ) {
+                              add_velocity_block(blockGID_next, popID + 1);
+                              blockLID_next = get_velocity_block_local_id(blockGID_next,popID + 1);                              
+                           }
+                           
+
+                           const Real* block_parameters_next = get_block_parameters(popID + 1) + blockLID_next * BlockParams::N_VELOCITY_BLOCK_PARAMS;
+                           const Real DV3_next = block_parameters_next[BlockParams::DVX]
+                              * block_parameters_next[BlockParams::DVY]
+                              * block_parameters_next[BlockParams::DVZ]; 
+                           uint i_next = (coords[0] - block_parameters_next[BlockParams::VXCRD])/block_parameters_next[BlockParams::DVX];
+                           uint j_next = (coords[1] - block_parameters_next[BlockParams::VYCRD])/block_parameters_next[BlockParams::DVY];
+                           uint k_next = (coords[2] - block_parameters_next[BlockParams::VZCRD])/block_parameters_next[BlockParams::DVZ];
+                           
+                           get_data(popID + 1)[blockLID_next * SIZE_VELBLOCK + cellIndex(i_next,j_next,k_next)] += numericalMass  / DV3_next;
+                        }
+                  
+                  }
+               }
+            // and finally remove block
+            this->remove_velocity_block(blockGID,popID);
          }
       }
-
+      
       // ADD all blocks with neighbors in spatial or velocity space (if it exists then the block is unchanged)
       for (std::unordered_set<vmesh::GlobalID>::iterator it=neighbors_have_content.begin(); it != neighbors_have_content.end(); ++it) {
          this->add_velocity_block(*it,popID);
       }
    }
+   
+   
+   
+
 
    #else       // AMR version
 
@@ -386,13 +440,14 @@ namespace spatial_cell {
          exit(1);
       }
       #endif
-      
+      #warning "adjustSingleCellVelocityBlocks does not do anything now, remove, or change to actually removing blocks if safe where called"
+
       //neighbor_ptrs is empty as we do not have any consistent
       //data in neighbours yet, adjustments done only based on velocity
       //space. TODO: should this delete blocks or not? Now not
       std::vector<SpatialCell*> neighbor_ptrs;
       update_velocity_block_content_lists(popID);
-      adjust_velocity_blocks(neighbor_ptrs,popID,false);
+      adjust_velocity_blocks(neighbor_ptrs,popID, 0);
    }
 
    void SpatialCell::coarsen_block(const vmesh::GlobalID& parent,const std::vector<vmesh::GlobalID>& children,const uint popID) {

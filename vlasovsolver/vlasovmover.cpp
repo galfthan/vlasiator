@@ -385,7 +385,8 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
    //- All cells update and communicate their lists of content blocks
    //- Only cells which were accerelated on this step need to be adjusted (blocks removed or added).
    //- Not done here on last step (done after loop)
-   if(step < (globalMaxSubcycles - 1)) adjustVelocityBlocks(mpiGrid, propagatedCells, false, popID);
+#warning VAMR: disabled adjust for acc-subcyles for now, does not support properly new shifting in AMR
+   //if(step < (globalMaxSubcycles - 1)) adjustVelocityBlocks(mpiGrid, propagatedCells, false, 1, popID);
 }
 
 /** Accelerate all particle populations to new time t+dt. 
@@ -403,7 +404,7 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
       // because the boundary conditions may have altered the velocity space, 
       // and to update changes in no-content blocks during translation.
       for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID)
-        adjustVelocityBlocks(mpiGrid, cells, true, popID);
+         adjustVelocityBlocks(mpiGrid, cells, true, 2, popID);
       goto momentCalculation;
    }
    phiprof::start("semilag-acc");
@@ -459,9 +460,11 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
           // Accelerate population over one subcycle step
           calculateAcceleration(popID,(uint)globalMaxSubcycles,step,mpiGrid,propagatedCells,dt);
        } // for-loop over acceleration substeps
-       
+    } // for-loop over particle species
+
+    for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {    
        // final adjust for all cells, also fixing remote cells.
-       adjustVelocityBlocks(mpiGrid, cells, true, popID);
+       adjustVelocityBlocks(mpiGrid, cells, true, 2,  popID);
     } // for-loop over particle species
 
     phiprof::stop("semilag-acc");

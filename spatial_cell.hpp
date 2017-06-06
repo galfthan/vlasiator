@@ -264,7 +264,7 @@ namespace spatial_cell {
       void adjustSingleCellVelocityBlocks(const uint popID);
       void adjust_velocity_blocks(const std::vector<SpatialCell*>& spatial_neighbors,
                                   const uint popID,
-                                  bool doDeleteEmptyBlocks=true);
+                                  int emptyBlockAction=1);
       void update_velocity_block_content_lists(const uint popID);
       bool checkMesh(const uint popID);
       void clear(const uint popID);
