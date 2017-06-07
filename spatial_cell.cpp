@@ -335,6 +335,77 @@ s    * velocity_block_with_content_list needs to be up to date in local and remo
             }
          }
       }
+
+      for (uint popID =populations.size() - 1 ; popID > 0; popID-- ) {
+         //shift up
+         for (vmesh::LocalID block_index=0; block_index<populations[popID].vmesh.size(); ++block_index) {
+            const vmesh::GlobalID blockGID = populations[popID].vmesh.getGlobalID(block_index);
+            //const velocity_block_indices_t indices = SpatialCell::get_velocity_block_indices(popID, blockGID);
+            const vmesh::LocalID blockLID = get_velocity_block_local_id(blockGID, popID);            
+            const Real* block_parameters = get_block_parameters(popID) + blockLID * BlockParams::N_VELOCITY_BLOCK_PARAMS;
+            const Real DV3 = block_parameters[BlockParams::DVX] * block_parameters[BlockParams::DVY] * block_parameters[BlockParams::DVZ];
+            
+            for (uint k=0; k<WID; ++k) {
+               for (uint j=0; j<WID; ++j) {
+                  for (uint i=0; i<WID; ++i) {
+                     Real coords[3];
+                     Realf value = get_data(popID)[blockLID * SIZE_VELBLOCK + cellIndex(i,j,k)];
+                     Realf minValue = populations[popID].velocityBlockMinValue;
+                     Realf minValue_next = populations[popID - 1].velocityBlockMinValue;
+                     
+                     if(value > minValue_next) {
+                        Realf numericalMass = value * DV3;
+                        //loop over cells in finer grid
+                        for (Real dvx = 0.25; dvx < 0.8; dvx+=0.5){
+                           for (Real dvy = 0.25; dvy < 0.8; dvy+=0.5){
+                              for (Real dvz = 0.25; dvz < 0.8; dvz+=0.5){
+                            
+                                 coords[0] = block_parameters[BlockParams::VXCRD] + (i + dvx) * block_parameters[BlockParams::DVX];
+                                 coords[1] = block_parameters[BlockParams::VYCRD] + (j + dvy) * block_parameters[BlockParams::DVY];
+                                 coords[2] = block_parameters[BlockParams::VZCRD] + (k + dvz) * block_parameters[BlockParams::DVZ];
+
+                                 
+                                 //TODO, by knowing how these relate one could
+                                 //instead of using coords directly compute how the
+                                 //indices relate with some integer
+                                 //arithmetics. Also one smaller block always maps
+                                 //to just one larger, but we recompute this block
+                                 //64 times anyway
+                                 //=>this is far too slow and  just POC 
+                                 const vmesh::GlobalID blockGID_next = get_velocity_block(popID - 1, coords, 0);
+                                 vmesh::LocalID blockLID_next = get_velocity_block_local_id(blockGID_next,popID - 1);                              
+                                 if (blockLID_next == invalid_local_id() ) {
+                                    add_velocity_block(blockGID_next, popID - 1);
+                                    blockLID_next = get_velocity_block_local_id(blockGID_next,popID - 1);                              
+                                 }
+                                 
+                                 const Real* block_parameters_next = get_block_parameters(popID - 1) + blockLID_next * BlockParams::N_VELOCITY_BLOCK_PARAMS;
+                                 const Real DV3_next = block_parameters_next[BlockParams::DVX] * block_parameters_next[BlockParams::DVY] * block_parameters_next[BlockParams::DVZ]; 
+                                 uint i_next = (coords[0] - block_parameters_next[BlockParams::VXCRD])/block_parameters_next[BlockParams::DVX];
+                                 uint j_next = (coords[1] - block_parameters_next[BlockParams::VYCRD])/block_parameters_next[BlockParams::DVY];
+                                 uint k_next = (coords[2] - block_parameters_next[BlockParams::VZCRD])/block_parameters_next[BlockParams::DVZ];
+                                 get_data(popID - 1)[blockLID_next * SIZE_VELBLOCK + cellIndex(i_next,j_next,k_next)] += 0.25 * numericalMass * shiftScale  / DV3_next;
+                              }
+                           }
+                        }
+                        
+                        if(shiftScale == 1.0)
+                           get_data(popID)[blockLID * SIZE_VELBLOCK + cellIndex(i,j,k)] = 0.0;
+                        else {
+                           get_data(popID)[blockLID * SIZE_VELBLOCK + cellIndex(i,j,k)] -= numericalMass * shiftScale / DV3;
+                           if(get_data(popID)[blockLID * SIZE_VELBLOCK + cellIndex(i,j,k)] < 0.0) {
+                              //fix negative values due to floating point precision
+                              get_data(popID)[blockLID * SIZE_VELBLOCK + cellIndex(i,j,k)] = 0.0; 
+                           }
+                        }
+                     }
+                  }
+               }
+            }
+         }
+      }
+
+
    }
    
    

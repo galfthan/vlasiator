@@ -706,6 +706,9 @@ int main(int argn,char* args[]) {
       }
       phiprof::stop("Spatial-space",computedCells,"Cells");
 
+
+
+
       phiprof::start("Compute interp moments");
       calculateInterpolatedVelocityMoments(
          mpiGrid,
@@ -727,6 +730,14 @@ int main(int argn,char* args[]) {
          phiprof::stop("Update system boundaries (Vlasov post-translation)");
          addTimedBarrier("barrier-boundary-conditions");
       }
+
+      //DO shift here, everything is set in correct level according to
+      //sparsity minval
+      for (size_t i=0; i<cells.size(); ++i) {
+         mpiGrid[cells[i]]->shift_velocity_blocks(1.0, 0.05);
+      }
+      
+
       
       // Propagate fields forward in time by dt. This needs to be done before the
       // moments for t + dt are computed (field uses t and t+0.5dt)
