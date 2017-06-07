@@ -62,7 +62,9 @@ namespace projects {
          counter = 0;
          #warning TODO: add SpatialCell::getVelocityBlockMinValue() in place of sparseMinValue
          while (search) {
-            if (0.1 * getObjectWrapper().particleSpecies[popID].sparseMinValue >
+            //HACK
+#warning "Hack for making sure we create enough blocks"
+            if (0.1 * getObjectWrapper().particleSpecies[popID].sparseMinValue * 1e-10 >
                 calcPhaseSpaceDensity(x,
                                       y,
                                       z,
@@ -85,7 +87,8 @@ namespace projects {
          search = true;
          counter = 0;
          while(search) {
-            if (0.1 * getObjectWrapper().particleSpecies[popID].sparseMinValue >
+#warning "Hack for making sure we create enough blocks"
+            if (0.1 * getObjectWrapper().particleSpecies[popID].sparseMinValue * 1e-10 >
                calcPhaseSpaceDensity(
                                      x,
                                      y,
@@ -111,7 +114,8 @@ namespace projects {
          search = true;
          counter = 0;
          while(search) {
-            if (0.1 * getObjectWrapper().particleSpecies[popID].sparseMinValue >
+#warning "Hack for making sure we create enough blocks"
+            if (0.1 * getObjectWrapper().particleSpecies[popID].sparseMinValue * 1e-10 >
                calcPhaseSpaceDensity(
                                      x,
                                      y,

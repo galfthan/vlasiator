@@ -204,6 +204,7 @@ void initializeGrid(
          phiprof::start("setCell");
          if (cell->sysBoundaryFlag == sysboundarytype::NOT_SYSBOUNDARY) {
             project.setCell(cell);
+            
          }
          phiprof::stop("setCell");
       }
@@ -217,16 +218,22 @@ void initializeGrid(
       }
       phiprof::stop("Apply system boundary conditions state");
 
+      //DO shift here, everything is set in correct level according to
+      //sparsity minval
+      for (size_t i=0; i<cells.size(); ++i) {
+         mpiGrid[cells[i]]->shift_velocity_blocks(1.0, 1.0);
+      }
+      
+
       for (size_t i=0; i<cells.size(); ++i) {
          mpiGrid[cells[i]]->parameters[CellParams::LBWEIGHTCOUNTER] = 0;
       }
 
+      
+
       for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
+         
          adjustVelocityBlocks(mpiGrid,cells,true, 2,popID);
-         #ifdef DEBUG_AMR_VALIDATE
-            writeVelMesh(mpiGrid);
-            validateMesh(mpiGrid,popID);
-         #endif
 
             // set initial LB metric based on number of blocks, all others
          // will be based on time spent in acceleration

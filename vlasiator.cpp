@@ -389,17 +389,19 @@ int main(int argn,char* args[]) {
 
    // Free up memory:
    readparameters.finalize();
-
+   
    // Save restart data
    if (P::writeInitialState) {
       phiprof::start("write-initial-state");
       if (myRank == MASTER_RANK)
          logFile << "(IO): Writing initial state to disk, tstep = "  << endl << writeVerbose;
-      P::systemWriteDistributionWriteStride.push_back(1);
+#warning just a hack to avoid too much io (1=> 0)
+      P::systemWriteDistributionWriteStride.push_back(0);
       P::systemWriteName.push_back("initial-grid");
-      P::systemWriteDistributionWriteXlineStride.push_back(0);
-      P::systemWriteDistributionWriteYlineStride.push_back(0);
-      P::systemWriteDistributionWriteZlineStride.push_back(0);
+#warning just a hack to avoid too much io (0=> 50)
+      P::systemWriteDistributionWriteXlineStride.push_back(50);
+      P::systemWriteDistributionWriteYlineStride.push_back(50);
+      P::systemWriteDistributionWriteZlineStride.push_back(50);
       P::systemWritePath.push_back("./");
 
       for(uint si=0; si<P::systemWriteName.size(); si++) {
@@ -417,7 +419,6 @@ int main(int argn,char* args[]) {
       P::systemWriteDistributionWriteYlineStride.pop_back();
       P::systemWriteDistributionWriteZlineStride.pop_back();
       P::systemWritePath.pop_back();
-
       phiprof::stop("write-initial-state");
    }
 

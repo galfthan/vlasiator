@@ -270,6 +270,8 @@ namespace spatial_cell {
       void adjust_velocity_blocks(const std::vector<SpatialCell*>& spatial_neighbors,
                                   const uint popID,
                                   int emptyBlockAction=1);
+      void shift_velocity_blocks(const Real minvalScale, const Real shiftScale);
+      
       void update_velocity_block_content_lists(const uint popID);
       bool checkMesh(const uint popID);
       void clear(const uint popID);
