@@ -6,48 +6,156 @@
 #include "../common.h"
 #include "gridGlue.hpp"
 
+
+/*
+Map from dccrg cell id to fsgrid global cell ids when they aren't identical (ie. when dccrg has refinement).
+*/
+
+std::vector<CellID> mapDccrgIdToFsGridGlobalID(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
+					       CellID dccrgID) {
+   const auto maxRefLvl  = mpiGrid.get_maximum_refinement_level();
+   const auto refLvl = mpiGrid.get_refinement_level(dccrgID);
+   const auto cellLength = pow(2,maxRefLvl-refLvl);
+   const auto topLeftIndices = mpiGrid.mapping.get_indices(dccrgID);
+   std::array<int,3> fsgridDims;
+   
+   fsgridDims[0] = P::xcells_ini * pow(2,mpiGrid.get_maximum_refinement_level());
+   fsgridDims[1] = P::ycells_ini * pow(2,mpiGrid.get_maximum_refinement_level());
+   fsgridDims[2] = P::zcells_ini * pow(2,mpiGrid.get_maximum_refinement_level());
+
+   std::vector<CellID> fsgridIDs(cellLength * cellLength * cellLength);
+   for (uint k = 0; k < cellLength; ++k) {
+      for (uint j = 0; j < cellLength; ++j) {
+         for (uint i = 0; i < cellLength; ++i) {
+	   const std::array<int,3> indices(topLeftIndices[0] + i,topLeftIndices[1] + j,topLeftIndices[2] + k);
+	   fsgridIDs[k*cellLength*cellLength + j*cellLength + i] = indices[0] + indices[1] * fsgridDims[0] + indices[2] * fsgridDims[1] * fsgridDims[0];
+	 }
+      }
+   }
+   return fsgridIDs;
+}
+
+
 void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
                            const std::vector<CellID>& cells,
                            FsGrid< std::array<Real, fsgrids::moments::N_MOMENTS>, 2>& momentsGrid, bool dt2 /*=false*/) {
 
-   momentsGrid.setupForTransferIn(cells.size());
+  //sort cells. Cells is typicall already sorted, but just to make sure....
+  const std::vector<CellID> dccrgCells = sort(cells.begin(), cells.end());
+  //size of fsgrid local part
+  const std::array<int, 3> gridDims(momentsGrid.getLocalSize());
 
-   // Setup transfer buffers
-   std::vector< std::array<Real, fsgrids::moments::N_MOMENTS> > transferBuffer(cells.size());
-
-   // Fill from cellParams
-   #pragma omp parallel for
-   for(int i=0; i< cells.size(); i++) {
-      auto cellParams = mpiGrid[cells[i]]->get_cell_parameters();
-      std::array<Real, fsgrids::moments::N_MOMENTS>* thisCellData = &transferBuffer[i];
-    
-      if(!dt2) {
-         thisCellData->at(fsgrids::moments::RHOM) = cellParams[CellParams::RHOM];
-         thisCellData->at(fsgrids::moments::RHOQ) = cellParams[CellParams::RHOQ];
-         thisCellData->at(fsgrids::moments::VX) = cellParams[CellParams::VX];
-         thisCellData->at(fsgrids::moments::VY) = cellParams[CellParams::VY];
-         thisCellData->at(fsgrids::moments::VZ) = cellParams[CellParams::VZ];
-         thisCellData->at(fsgrids::moments::P_11) = cellParams[CellParams::P_11];
-         thisCellData->at(fsgrids::moments::P_22) = cellParams[CellParams::P_22];
-         thisCellData->at(fsgrids::moments::P_33) = cellParams[CellParams::P_33];
-      } else {
-         thisCellData->at(fsgrids::moments::RHOM) = cellParams[CellParams::RHOM_DT2];
-         thisCellData->at(fsgrids::moments::RHOQ) = cellParams[CellParams::RHOQ_DT2];
-         thisCellData->at(fsgrids::moments::VX) = cellParams[CellParams::VX_DT2];
-         thisCellData->at(fsgrids::moments::VY) = cellParams[CellParams::VY_DT2];
-         thisCellData->at(fsgrids::moments::VZ) = cellParams[CellParams::VZ_DT2];
-         thisCellData->at(fsgrids::moments::P_11) = cellParams[CellParams::P_11_DT2];
-         thisCellData->at(fsgrids::moments::P_22) = cellParams[CellParams::P_22_DT2];
-         thisCellData->at(fsgrids::moments::P_33) = cellParams[CellParams::P_33_DT2];
+  //Compute what we will receive, so what dccrg cells and from who
+  std::map<int, std::set<CellID> > receivedCells; // process => dccrg cells we will receive from it
+  for (int k=0; k<gridDims[2]; k++) {
+    for (int j=0; j<gridDims[1]; j++) {
+      for (int i=0; i<gridDims[0]; i++) {
+	const dccrg::Types<3>::indices_t  indices = momentsGrid.getGlobalIndices(i,j,k); 
+	CellID dccrgCell = mpiGrid.get_existing_cell(indices, 0, mpiGrid.mapping.get_maximum_refinement_level());
+	int process = mpiGrid.get_process(dccrgCell);
+	receivedCells[process].insert(dccrgCell); //cells are ordered (sorted) in set
       }
-   }
+    }
+  }
 
-   for(int i=0; i< cells.size(); i++) {
-      momentsGrid.transferDataIn(cells[i] - 1, &transferBuffer[i]);
-   }
+  // Post receives
+  std::map<int, std::vector<Real> > receivedData; // store receive buffers  to receive each process
+  std::vector<MPI_Request> receiveRequests(receivedCells.size());
+  int i=0;
+  for(auto const &receives: receivedCells){
+    int process = receives.first;
+    int count = receives.second.size();
+    receivedData[process].resize(count * fsgrids::moments::N_MOMENTS);
+    MPI_Irecv(receivedData[process].data(), count * fsgrids::moments::N_MOMENTS * sizeof(real), MPI_BYTE, process, 1, MPI_COMM_WORLD,&(recieveRequests[i]));
+    i++;
+  }
 
-   // Finish the actual transfer
-   momentsGrid.finishTransfersIn();
+  // Compute where to send data and what to send
+  
+  std::map<int, std::vector<Real> > sendData; // store send buffers  to send to each process
+  for(int i=0; i< dccrgCells.size(); i++) {
+     //Collect data to send for this dccrg cell
+     auto cellParams = mpiGrid[dccrgCells[i]]->get_cell_parameters();
+     std::array<Real, fsgrids::moments::N_MOMENTS> sendBuffer; 
+     if(!dt2) {
+        sendBuffer[fsgrids::moments::RHOM] = cellParams[CellParams::RHOM];
+	sendBuffer[fsgrids::moments::RHOQ] = cellParams[CellParams::RHOQ];
+	sendBuffer[fsgrids::moments::VX] = cellParams[CellParams::VX];
+	sendBuffer[fsgrids::moments::VY] = cellParams[CellParams::VY];
+	sendBuffer[fsgrids::moments::VZ] = cellParams[CellParams::VZ];
+	sendBuffer[fsgrids::moments::P_11] = cellParams[CellParams::P_11];
+	sendBuffer[fsgrids::moments::P_22] = cellParams[CellParams::P_22];
+	sendBuffer[fsgrids::moments::P_33] = cellParams[CellParams::P_33];
+     } else {
+        sendBuffer[fsgrids::moments::RHOM] = cellParams[CellParams::RHOM_DT2];
+        sendBuffer[fsgrids::moments::RHOQ] = cellParams[CellParams::RHOQ_DT2];
+        sendBuffer[fsgrids::moments::VX] = cellParams[CellParams::VX_DT2];
+	sendBuffer[fsgrids::moments::VY] = cellParams[CellParams::VY_DT2];
+	sendBuffer[fsgrids::moments::VZ] = cellParams[CellParams::VZ_DT2];
+	sendBuffer[fsgrids::moments::P_11] = cellParams[CellParams::P_11_DT2];
+	sendBuffer[fsgrids::moments::P_22] = cellParams[CellParams::P_22_DT2];
+	sendBuffer[fsgrids::moments::P_33] = cellParams[CellParams::P_33_DT2];
+     }
+
+     //compute to which processes this cell maps
+     std::set<int> mappedToProcesses;
+     std::vector<CellID> fsCells = mapDccrgIdToFsGridGlobalID(mpiGrid, dccrgCells[i]);
+     //loop over fsgrid cells which this dccrg cell maps to
+     for (auto const &fsCellID : fsCells) {
+       mappedToProcesses.insert(momentsGrid.getTaskForGlobalID(fsCellID));
+     }
+
+     //loop over all target processes, and add to sendData the data to send for this one dccrg cell
+     for (auto process : mappedToProcesses){
+       //       sendCellId[process].push_back(dccrgCells[i]);
+       sendData[process].push_back(sendBuffer);  //since dccrg cells is ordered, data sent ot each process is also ordered
+     }
+  }
+  
+  // Post sends
+
+  std::vector<MPI_Request> sendRequests(sendData.size());
+  i=0;
+  for(auto const &sends: sendData){
+    int process = sends.first;
+    int count = sends.second.size(); //note, compared to receive this includes all elements to be sent
+    MPI_Isend(sends.second.data(), count * sizeof(real), MPI_BYTE, process, 1, MPI_COMM_WORLD,&(sendRequests[i]));
+    i++;
+  }
+
+
+  MPI_Wait_all(receiveRequests.size(),receiveRequests, MPI_STATUSES_IGNORE);
+
+  //    std::map<int, std::vector<Real> > receivedData; // store receive buffers  to receive each process
+  //  std::map<int, std::set<CellID> > receivedCells; // process => dccrg cells we will receive from it  
+  std::map<CellID, Real* > combinedReceivedData; //dccrg cellID => data received from it
+
+  
+  for(auto const &receives: receivedCells){
+    int process = receives.first; //data received from this process
+    Real* receiveBuffer = rereceivedData[process].data(); // data received from process
+    for(auto const &cell: receives.second){ //loop over cellids (dccrg) for receive
+      // this part heavily relies on both sender and receiver having cellids sorted!
+      combinedReceivedData[cell]=receiveBuffer;  //store pointer
+      receiveBuffer+=fsgrids::moments::N_MOMENTS; //jump to next cell
+    }
+  }
+
+  //Store the correct data into the fsGrid
+  //loop over local fsgrid cells
+  for (int k=0; k<gridDims[2]; k++) {
+    for (int j=0; j<gridDims[1]; j++) {
+      for (int i=0; i<gridDims[0]; i++) {
+	const dccrg::Types<3>::indices_t  indices = momentsGrid.getGlobalIndices(i,j,k); 
+	CellID dccrgCell = mpiGrid.get_existing_cell(indices, 0, mpiGrid.mapping.get_maximum_refinement_level());
+	Real * dccrggridData = combinedReceivedData[dccrgCell];
+	Real * fsgridData = momentsGrid.get(i,j,k);
+	for(l=0;l<fsgrids::moments::N_MOMENTS<l++)
+	  fsgridData[l] = dccrggridData[l];
+      }
+    }
+  }
+  MPI_Wait_all(sendRequests.size(),receiveRequests, MPI_STATUSES_IGNORE);
 }
 
 
