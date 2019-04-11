@@ -27,7 +27,7 @@ std::vector<CellID> mapDccrgIdToFsGridGlobalID(dccrg::Dccrg<SpatialCell,dccrg::C
    for (uint k = 0; k < cellLength; ++k) {
       for (uint j = 0; j < cellLength; ++j) {
          for (uint i = 0; i < cellLength; ++i) {
-	   const std::array<int,3> indices(topLeftIndices[0] + i,topLeftIndices[1] + j,topLeftIndices[2] + k);
+	   const std::array<uint64_t,3> indices = {{topLeftIndices[0] + i,topLeftIndices[1] + j,topLeftIndices[2] + k}};
 	   fsgridIDs[k*cellLength*cellLength + j*cellLength + i] = indices[0] + indices[1] * fsgridDims[0] + indices[2] * fsgridDims[1] * fsgridDims[0];
 	 }
       }
@@ -40,17 +40,38 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
                            const std::vector<CellID>& cells,
                            FsGrid< std::array<Real, fsgrids::moments::N_MOMENTS>, 2>& momentsGrid, bool dt2 /*=false*/) {
 
-  //sort cells. Cells is typicall already sorted, but just to make sure....
-  const std::vector<CellID> dccrgCells = sort(cells.begin(), cells.end());
+  int ii;
+  //sorted list of dccrg cells. cells is typicall already sorted, but just to make sure....
+  std::vector<CellID> dccrgCells = cells;
+  std::sort(dccrgCells.begin(), dccrgCells.end());
+
   //size of fsgrid local part
   const std::array<int, 3> gridDims(momentsGrid.getLocalSize());
 
+  // map receive process => dccrg cells we will receive from it
+  std::map<int, std::set<CellID> > receivedCells; 
+  // map receive process => receive buffers 
+  std::map<int, std::vector<Real> > receivedData; 
+  //list of receive requests
+  std::vector<MPI_Request> receiveRequests;
+  // map dccrg cellID => data received from it
+  std::map<CellID, Real* > combinedReceivedData; 
+
+  // map send process => send buffers  to each process
+  std::map<int, std::vector<Real> > sendData; 
+  //list of send requests
+  std::vector<MPI_Request> sendRequests;
+
+  
+  
   //Compute what we will receive, so what dccrg cells and from who
-  std::map<int, std::set<CellID> > receivedCells; // process => dccrg cells we will receive from it
   for (int k=0; k<gridDims[2]; k++) {
     for (int j=0; j<gridDims[1]; j++) {
       for (int i=0; i<gridDims[0]; i++) {
-	const dccrg::Types<3>::indices_t  indices = momentsGrid.getGlobalIndices(i,j,k); 
+	const std::array<int, 3> globalIndices = momentsGrid.getGlobalIndices(i,j,k);
+	const dccrg::Types<3>::indices_t  indices = {{(uint64_t)globalIndices[0],
+						      (uint64_t)globalIndices[1],
+						      (uint64_t)globalIndices[2]}}; //cast to avoid warnings
 	CellID dccrgCell = mpiGrid.get_existing_cell(indices, 0, mpiGrid.mapping.get_maximum_refinement_level());
 	int process = mpiGrid.get_process(dccrgCell);
 	receivedCells[process].insert(dccrgCell); //cells are ordered (sorted) in set
@@ -59,20 +80,19 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
   }
 
   // Post receives
-  std::map<int, std::vector<Real> > receivedData; // store receive buffers  to receive each process
-  std::vector<MPI_Request> receiveRequests(receivedCells.size());
-  int i=0;
+  receiveRequests.resize(receivedCells.size());
+  
+  ii=0;
   for(auto const &receives: receivedCells){
     int process = receives.first;
     int count = receives.second.size();
     receivedData[process].resize(count * fsgrids::moments::N_MOMENTS);
-    MPI_Irecv(receivedData[process].data(), count * fsgrids::moments::N_MOMENTS * sizeof(real), MPI_BYTE, process, 1, MPI_COMM_WORLD,&(recieveRequests[i]));
-    i++;
+    MPI_Irecv(receivedData[process].data(), count * fsgrids::moments::N_MOMENTS * sizeof(Real), MPI_BYTE, process, 1, MPI_COMM_WORLD,&(receiveRequests[ii]));
+    ii++;
   }
 
   // Compute where to send data and what to send
   
-  std::map<int, std::vector<Real> > sendData; // store send buffers  to send to each process
   for(int i=0; i< dccrgCells.size(); i++) {
      //Collect data to send for this dccrg cell
      auto cellParams = mpiGrid[dccrgCells[i]]->get_cell_parameters();
@@ -102,38 +122,35 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
      std::vector<CellID> fsCells = mapDccrgIdToFsGridGlobalID(mpiGrid, dccrgCells[i]);
      //loop over fsgrid cells which this dccrg cell maps to
      for (auto const &fsCellID : fsCells) {
-       mappedToProcesses.insert(momentsGrid.getTaskForGlobalID(fsCellID));
+       mappedToProcesses.insert(momentsGrid.getTaskForGlobalID(fsCellID).first);
      }
 
      //loop over all target processes, and add to sendData the data to send for this one dccrg cell
      for (auto process : mappedToProcesses){
        //       sendCellId[process].push_back(dccrgCells[i]);
-       sendData[process].push_back(sendBuffer);  //since dccrg cells is ordered, data sent ot each process is also ordered
+       for( auto val: sendBuffer) {
+	 //since dccrgCells is ordered, data sent to each process is also ordered according to dccrgCellid
+	 sendData[process].push_back(val);  
+       }
      }
   }
   
   // Post sends
 
-  std::vector<MPI_Request> sendRequests(sendData.size());
-  i=0;
+  ii=0;
+  sendRequests.resize(sendData.size());
   for(auto const &sends: sendData){
     int process = sends.first;
     int count = sends.second.size(); //note, compared to receive this includes all elements to be sent
-    MPI_Isend(sends.second.data(), count * sizeof(real), MPI_BYTE, process, 1, MPI_COMM_WORLD,&(sendRequests[i]));
-    i++;
+    MPI_Isend(sends.second.data(), count * sizeof(Real), MPI_BYTE, process, 1, MPI_COMM_WORLD,&(sendRequests[ii]));
+    ii++;
   }
 
-
-  MPI_Wait_all(receiveRequests.size(),receiveRequests, MPI_STATUSES_IGNORE);
-
-  //    std::map<int, std::vector<Real> > receivedData; // store receive buffers  to receive each process
-  //  std::map<int, std::set<CellID> > receivedCells; // process => dccrg cells we will receive from it  
-  std::map<CellID, Real* > combinedReceivedData; //dccrg cellID => data received from it
-
+  MPI_Waitall(receiveRequests.size(), receiveRequests.data(), MPI_STATUSES_IGNORE);
   
   for(auto const &receives: receivedCells){
     int process = receives.first; //data received from this process
-    Real* receiveBuffer = rereceivedData[process].data(); // data received from process
+    Real* receiveBuffer = receivedData[process].data(); // data received from process
     for(auto const &cell: receives.second){ //loop over cellids (dccrg) for receive
       // this part heavily relies on both sender and receiver having cellids sorted!
       combinedReceivedData[cell]=receiveBuffer;  //store pointer
@@ -143,19 +160,22 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
 
   //Store the correct data into the fsGrid
   //loop over local fsgrid cells
-  for (int k=0; k<gridDims[2]; k++) {
-    for (int j=0; j<gridDims[1]; j++) {
-      for (int i=0; i<gridDims[0]; i++) {
-	const dccrg::Types<3>::indices_t  indices = momentsGrid.getGlobalIndices(i,j,k); 
+  for (int k = 0; k < gridDims[2]; k++) {
+    for (int j = 0; j < gridDims[1]; j++) {
+      for (int i = 0; i < gridDims[0]; i++) {
+	const std::array<int, 3> globalIndices = momentsGrid.getGlobalIndices(i,j,k);
+	const dccrg::Types<3>::indices_t  indices = {{(uint64_t)globalIndices[0],
+						      (uint64_t)globalIndices[1],
+						      (uint64_t)globalIndices[2]}}; //cast to avoid warnings
 	CellID dccrgCell = mpiGrid.get_existing_cell(indices, 0, mpiGrid.mapping.get_maximum_refinement_level());
 	Real * dccrggridData = combinedReceivedData[dccrgCell];
-	Real * fsgridData = momentsGrid.get(i,j,k);
-	for(l=0;l<fsgrids::moments::N_MOMENTS<l++)
+	auto fsgridData = *momentsGrid.get(i,j,k);
+	for(int l = 0; l < fsgrids::moments::N_MOMENTS; l++)
 	  fsgridData[l] = dccrggridData[l];
       }
     }
   }
-  MPI_Wait_all(sendRequests.size(),receiveRequests, MPI_STATUSES_IGNORE);
+  MPI_Waitall(sendRequests.size(), sendRequests.data(), MPI_STATUSES_IGNORE);
 }
 
 
