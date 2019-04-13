@@ -58,12 +58,13 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
   std::map<CellID, Real* > combinedReceivedData; 
 
   // map send process => send buffers  to each process
-  std::map<int, std::vector<Real> > sendData; 
+  std::map<int, std::vector<Real> > sendData;
+  //  std::map<int, std::vector<CellID> > sendCellId; 
   //list of send requests
   std::vector<MPI_Request> sendRequests;
 
   
-  
+ 
   //Compute what we will receive, so what dccrg cells and from who
   for (int k=0; k<gridDims[2]; k++) {
     for (int j=0; j<gridDims[1]; j++) {
@@ -127,7 +128,7 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
 
      //loop over all target processes, and add to sendData the data to send for this one dccrg cell
      for (auto process : mappedToProcesses){
-       //       sendCellId[process].push_back(dccrgCells[i]);
+       // sendCellId[process].push_back(dccrgCells[i]);
        for( auto val: sendBuffer) {
 	 //since dccrgCells is ordered, data sent to each process is also ordered according to dccrgCellid
 	 sendData[process].push_back(val);  
@@ -176,6 +177,42 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
     }
   }
   MPI_Waitall(sendRequests.size(), sendRequests.data(), MPI_STATUSES_IGNORE);
+
+
+
+  //debug
+  /*
+  int rank, nProcs;
+  int dRank=1;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &nProcs);
+   
+  if(rank==dRank){
+    for ( auto const &msg: sendCellId)  {
+      printf("SND %d => %d :\n", rank, msg.first);
+      for ( auto const &id: msg.second)  {
+	printf(" %ld ", id);
+      }
+      printf("\n");
+    }
+  }
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  for(int r = 0; r < nProcs; r++){
+    if(rank == r){
+      for ( auto const &msg: receivedCells)  {
+	if (msg.first == dRank) {
+	  printf("RCV %d => %d :\n", msg.first, rank);
+	  for ( auto const &id: msg.second)  {
+	    printf(" %ld ", id);
+	  }
+	  printf("\n");
+	}
+      }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+  */
 }
 
 
