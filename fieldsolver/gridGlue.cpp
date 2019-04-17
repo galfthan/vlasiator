@@ -77,7 +77,7 @@ template <typename T, int stencil> void computeCoupling(dccrg::Dccrg<SpatialCell
 	CellID dccrgCell = mpiGrid.get_existing_cell(indices, 0, mpiGrid.mapping.get_maximum_refinement_level());
 	int process = mpiGrid.get_process(dccrgCell);
 	int64_t  fsgridLid = momentsGrid.LocalIDForCoords(i,j,k);
-	  
+	int64_t  fsgridGid = momentsGrid.GlobalIDForCoords(i,j,k);
 	onFsgridMapRemoteProcess[process].insert(dccrgCell); //cells are ordered (sorted) in set
 	onFsgridMapCells[dccrgCell].push_back(fsgridLid);
       }
@@ -88,6 +88,7 @@ template <typename T, int stencil> void computeCoupling(dccrg::Dccrg<SpatialCell
   for(int i=0; i< dccrgCells.size(); i++) {
      //compute to which processes this cell maps
      std::vector<CellID> fsCells = mapDccrgIdToFsGridGlobalID(mpiGrid, dccrgCells[i]);
+
      //loop over fsgrid cells which this dccrg cell maps to
      for (auto const &fsCellID : fsCells) {
        int process = momentsGrid.getTaskForGlobalID(fsCellID).first; //process on fsgrid
@@ -99,7 +100,7 @@ template <typename T, int stencil> void computeCoupling(dccrg::Dccrg<SpatialCell
 
 
   //debug
-  /*
+
   int rank, nProcs;
   int dRank=1;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -130,7 +131,7 @@ template <typename T, int stencil> void computeCoupling(dccrg::Dccrg<SpatialCell
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
-  */
+
 }
 
 		     
@@ -162,6 +163,16 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
   std::vector<MPI_Request> receiveRequests;
 
 
+  //DEBUG IN
+  for(int i = 0;i < cells.size();i++){
+    auto cellParams = mpiGrid[cells[i]]->get_cell_parameters();
+    if(!dt2)
+      printf("IN %ld: %g %g , %g %g %g \n", cells[i],cellParams[CellParams::RHOM],cellParams[CellParams::RHOQ],cellParams[CellParams::VX],cellParams[CellParams::VY], cellParams[CellParams::VZ]);
+    else
+      printf("IN %ld: %g %g , %g %g %g \n", cells[i],cellParams[CellParams::RHOM_DT2],cellParams[CellParams::RHOQ_DT2],cellParams[CellParams::VX_DT2],cellParams[CellParams::VY_DT2], cellParams[CellParams::VZ_DT2]);
+  }
+  
+
   //computeCoupling
   computeCoupling(mpiGrid, cells, momentsGrid, onDccrgMapRemoteProcess, onFsgridMapRemoteProcess, onFsgridMapCells);
   
@@ -177,6 +188,7 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
 	      MPI_BYTE, process, 1, MPI_COMM_WORLD,&(receiveRequests[ii++]));
   }
   
+
   
   // Launch sends
   ii=0;
@@ -221,17 +233,31 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
     for(auto const &cell: receives.second){ //loop over cellids (dccrg) for receive
       // this part heavily relies on both sender and receiver having cellids sorted!
       for(auto lid: onFsgridMapCells[cell]){
-	auto fsgridData = *momentsGrid.get(lid);
+	std::array<Real, fsgrids::moments::N_MOMENTS> * fsgridData = momentsGrid.get(lid);
 	for(int l = 0; l < fsgrids::moments::N_MOMENTS; l++)   {
-	  fsgridData[l] = receiveBuffer[l];
+	  fsgridData->at(l) = receiveBuffer[l];
 	}
       }
+      receiveBuffer+=fsgrids::moments::N_MOMENTS;
     }
   }
-
-
   MPI_Waitall(sendRequests.size(), sendRequests.data(), MPI_STATUSES_IGNORE);
 
+  //DEBUG OUT
+  //Compute what we will receive, and where it should be stored
+  for (int k=0; k<gridDims[2]; k++) {
+    for (int j=0; j<gridDims[1]; j++) {
+      for (int i=0; i<gridDims[0]; i++) {
+	int64_t  fsgridGid = momentsGrid.GlobalIDForCoords(i,j,k);
+	int64_t  fsgridLid = momentsGrid.LocalIDForCoords(i,j,k);
+	std::array<Real, fsgrids::moments::N_MOMENTS> * fsgridData = momentsGrid.get(fsgridLid);
+	printf("OUT %ld (+1): %g %g , %g %g %g \n", fsgridGid + 1,
+	       fsgridData->at(0), fsgridData->at(1), fsgridData->at(2), fsgridData->at(3),fsgridData->at(4));
+	
+      }
+    }
+  }  
+  MPI_Barrier(MPI_COMM_WORLD);
 }
 
 
@@ -301,7 +327,7 @@ void getVolumeFieldsFromFsGrid(FsGrid< std::array<Real, fsgrids::volfields::N_VO
    // Distribute data from the transfer buffer back into the appropriate mpiGrid places
    #pragma omp parallel for
    for(int i=0; i< cells.size(); i++) {
-      std::array<Real, fsgrids::volfields::N_VOL>* thisCellData = &transferBuffer[i];
+     std::array<Real, fsgrids::volfields::N_VOL>* thisCellData = &transferBuffer[i];
       auto cellParams = mpiGrid[cells[i]]->get_cell_parameters();
 
       cellParams[CellParams::PERBXVOL]                          = thisCellData->at(fsgrids::volfields::PERBXVOL);
