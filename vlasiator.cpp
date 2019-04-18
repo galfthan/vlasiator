@@ -401,7 +401,7 @@ int main(int argn,char* args[]) {
    std::array<bool,3> periodicity{mpiGrid.topology.is_periodic(0),
                                  mpiGrid.topology.is_periodic(1),
                                  mpiGrid.topology.is_periodic(2)};
-   
+
    FsGridCouplingInformation gridCoupling;
    FsGrid< std::array<Real, fsgrids::bfield::N_BFIELD>, 2> perBGrid(fsGridDimensions, comm, periodicity,gridCoupling);
    FsGrid< std::array<Real, fsgrids::bfield::N_BFIELD>, 2> perBDt2Grid(fsGridDimensions, comm, periodicity,gridCoupling);
@@ -432,11 +432,10 @@ int main(int argn,char* args[]) {
    phiprof::stop("Init fieldsolver grids");
    phiprof::start("Initial fsgrid coupling");
    const std::vector<CellID>& cells = getLocalCells();
-   
+
    // Couple FSGrids to mpiGrid. Note that the coupling information is shared
    // between them.
    technicalGrid.setupForGridCoupling(cells.size());
-
    
    // Each dccrg cell may have to communicate with multiple fsgrid cells, if they are on a lower refinement level.
    // Calculate the corresponding fsgrid ids for each dccrg cell and set coupling for each fsgrid id.
@@ -902,6 +901,7 @@ int main(int argn,char* args[]) {
          // cout << endl;
          
          technicalGrid. finishGridCoupling();
+
          phiprof::stop("fsgrid-recouple-after-lb");
 
          overrideRebalanceNow = false;
