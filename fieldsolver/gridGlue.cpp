@@ -38,9 +38,9 @@ std::vector<CellID> mapDccrgIdToFsGridGlobalID(dccrg::Dccrg<SpatialCell,dccrg::C
 
 /*Compute coupling DCCRG <=> FSGRID 
 
-  onDccrgMapCells  maps fsgrid processes (key) => set of dccrg cellIDs owned by current rank that map to  the fsgrid cells owned by fsgrid process (val)
-  onFsgridMapCells maps dccrg processes  (key) => set of dccrg cellIDs owned by dccrg-process that map to current rank fsgrid cells 
-  onFsgridMapCells maps remote dccrg CellIDs to local fsgrid cells
+  onDccrgMapRemoteProcess   maps fsgrid processes (key) => set of dccrg cellIDs owned by current rank that map to  the fsgrid cells owned by fsgrid process (val)
+  onFsgridMapRemoteProcess  maps dccrg processes  (key) => set of dccrg cellIDs owned by dccrg-process that map to current rank fsgrid cells 
+  onFsgridMapCells          maps remote dccrg CellIDs to local fsgrid cells
 */
 
 template <typename T, int stencil> void computeCoupling(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
@@ -50,8 +50,7 @@ template <typename T, int stencil> void computeCoupling(dccrg::Dccrg<SpatialCell
 							std::map<int, std::set<CellID> >& onFsgridMapRemoteProcess,
 							std::map<CellID, std::vector<int64_t> >& onFsgridMapCells
 							) {
-  
-  
+    
   //sorted list of dccrg cells. cells is typicall already sorted, but just to make sure....
   std::vector<CellID> dccrgCells = cells;
   std::sort(dccrgCells.begin(), dccrgCells.end());
@@ -96,7 +95,6 @@ template <typename T, int stencil> void computeCoupling(dccrg::Dccrg<SpatialCell
      }    
   }
   
-
   //debug
   // int rank, nProcs;
   // int dRank=1;
@@ -214,6 +212,7 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
     ii++;
   }
 
+  
   MPI_Waitall(receiveRequests.size(), receiveRequests.data(), MPI_STATUSES_IGNORE);
   for(auto const &receives: onFsgridMapRemoteProcess){
     int process = receives.first; //data received from this process
@@ -226,6 +225,7 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
 	  fsgridData->at(l) = receiveBuffer[l];
 	}
       }
+      
       receiveBuffer+=fsgrids::moments::N_MOMENTS;
     }
   }
@@ -332,6 +332,7 @@ void getVolumeFieldsFromFsGrid(FsGrid< std::array<Real, fsgrids::volfields::N_VO
       mpiGrid[cells[i]]->derivativesBVOL[bvolderivatives::dPERBYVOLdz] = thisCellData->at(fsgrids::volfields::dPERBYVOLdz);
       mpiGrid[cells[i]]->derivativesBVOL[bvolderivatives::dPERBZVOLdx] = thisCellData->at(fsgrids::volfields::dPERBZVOLdx);
       mpiGrid[cells[i]]->derivativesBVOL[bvolderivatives::dPERBZVOLdy] = thisCellData->at(fsgrids::volfields::dPERBZVOLdy);
+
    }
 }
 
