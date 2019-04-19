@@ -48,6 +48,7 @@
 #include "IPShock/IPShock.h"
 #include "Template/Template.h"
 #include "test_fp/test_fp.h"
+#include "testAmr/testAmr.h"
 #include "testHall/testHall.h"
 #include "test_trans/test_trans.h"
 #include "verificationLarmor/verificationLarmor.h"
@@ -125,6 +126,7 @@ namespace projects {
       projects::IPShock::addParameters();
       projects::Template::addParameters();
       projects::test_fp::addParameters();
+      projects::testAmr::addParameters();
       projects::TestHall::addParameters();
       projects::test_trans::addParameters();
       projects::verificationLarmor::addParameters();
@@ -507,6 +509,20 @@ namespace projects {
          (int) ((z - Parameters::zmin) / dz) * Parameters::xcells_ini * Parameters::ycells_ini;
       setRandomSeed(cell,cellID);
    }
+
+   /*
+     Refine cells of mpiGrid. Each project that wants refinement shoudl implement this function. 
+     Base class function prints a warning and does nothing.
+    */
+   bool Project::refineSpatialCells( dccrg::Dccrg<spatial_cell::SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid ) const {
+      int rank;
+      MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+      if (rank == MASTER_RANK) {
+         cerr << "(Project.cpp) Base class 'refineSpatialCells' in " << __FILE__ << ":" << __LINE__ << " called. This function does nothing." << endl;
+      }
+
+      return false;
+   }
    
 Project* createProject() {
    Project* rvalue = NULL;
@@ -570,6 +586,9 @@ Project* createProject() {
    }
    if(Parameters::projectName == "test_fp") {
       rvalue = new projects::test_fp;
+   }
+   if(Parameters::projectName == "testAmr") {
+      rvalue = new projects::testAmr;
    }
    if(Parameters::projectName == "testHall") {
       rvalue = new projects::TestHall;

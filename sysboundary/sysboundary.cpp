@@ -325,6 +325,63 @@ bool SysBoundary::initSysBoundaries(
    return success;
 }
 
+bool SysBoundary::checkRefinement(dccrg::Dccrg<spatial_cell::SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid) {
+
+   // Set is used to avoid storing duplicates - each cell only needs to be checked once
+   std::set<CellID> innerBoundaryCells;
+   std::set<CellID> outerBoundaryCells;
+
+   int innerBoundaryRefLvl = -1;
+   int outerBoundaryRefLvl = -1;
+   
+   // Collect cells by sysboundarytype
+   for (auto cellId : mpiGrid.get_cells()) {
+      SpatialCell* cell = mpiGrid[cellId];
+      if(cell) {
+         if (cell->sysBoundaryFlag == sysboundarytype::IONOSPHERE) {
+            innerBoundaryCells.insert(cellId);
+            innerBoundaryRefLvl = mpiGrid.get_refinement_level(cellId);
+            if (cell->sysBoundaryLayer == 1) {
+               // Add non-boundary neighbors of layer 1 cells
+               auto* nbrPairVector = mpiGrid.get_neighbors_of(cellId,FULL_NEIGHBORHOOD_ID);
+               for (auto nbrPair : *nbrPairVector) {
+                  if(nbrPair.first != INVALID_CELLID) {
+                     innerBoundaryCells.insert(nbrPair.first);
+                  }
+               }
+            }
+         } else if (cell->sysBoundaryFlag != sysboundarytype::NOT_SYSBOUNDARY &&
+                    cell->sysBoundaryFlag != sysboundarytype::DO_NOT_COMPUTE) {
+            outerBoundaryCells.insert(cellId);
+            outerBoundaryRefLvl = mpiGrid.get_refinement_level(cellId);
+            // Add non-boundary neighbors of outer boundary cells
+            auto* nbrPairVector = mpiGrid.get_neighbors_of(cellId,FULL_NEIGHBORHOOD_ID);
+            for (auto nbrPair : *nbrPairVector) {
+               if(nbrPair.first != INVALID_CELLID) {
+                  outerBoundaryCells.insert(nbrPair.first);
+               }
+            }
+         }
+      }
+   }
+
+   for (auto cellId : innerBoundaryCells) {
+      if (cellId != INVALID_CELLID && mpiGrid.get_refinement_level(cellId) != innerBoundaryRefLvl) {
+         return false;
+      }
+   }
+
+   for (auto cellId : outerBoundaryCells) {
+      if (cellId != INVALID_CELLID && mpiGrid.get_refinement_level(cellId) != outerBoundaryRefLvl) {
+         // cout << "Failed refinement check " << cellId << " " << mpiGrid.get_refinement_level(cellId) << " "<< outerBoundaryRefLvl << endl;
+         return false;
+      }
+   }
+   
+   return true;
+}
+
+
 /*!\brief Classify all simulation cells with respect to the system boundary conditions.
  * 
  * Loops through all cells and and for each assigns the correct sysBoundaryFlag depending on
@@ -335,7 +392,7 @@ bool SysBoundary::initSysBoundaries(
 bool SysBoundary::classifyCells(dccrg::Dccrg<spatial_cell::SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid) {
    bool success = true;
    vector<CellID> cells = mpiGrid.get_cells();
-
+   
    /*set all cells to default value, not_sysboundary*/
    for(uint i=0; i<cells.size(); i++) {
       mpiGrid[cells[i]]->sysBoundaryFlag = sysboundarytype::NOT_SYSBOUNDARY;
@@ -441,6 +498,7 @@ bool SysBoundary::classifyCells(dccrg::Dccrg<spatial_cell::SpatialCell,dccrg::Ca
    /*communicate which cells have Layer 1 set above for local cells (sysBoundaryFlag
     * and sysBoundaryLayer communicated)*/
    SpatialCell::set_mpi_transfer_type(Transfer::CELL_SYSBOUNDARYFLAG);
+
    mpiGrid.update_copies_of_remote_neighbors(SYSBOUNDARIES_NEIGHBORHOOD_ID);
 
    /*Compute distances*/
@@ -459,10 +517,11 @@ bool SysBoundary::classifyCells(dccrg::Dccrg<spatial_cell::SpatialCell,dccrg::Ca
             }
          }
       }
+
       SpatialCell::set_mpi_transfer_type(Transfer::CELL_SYSBOUNDARYFLAG);
       mpiGrid.update_copies_of_remote_neighbors(SYSBOUNDARIES_NEIGHBORHOOD_ID);
    }
-   
+
    /*set cells to DO_NOT_COMPUTE if they are on boundary, and are not
     * in the first two layers of the boundary*/
    for(uint i=0; i<cells.size(); i++) {
@@ -473,7 +532,7 @@ bool SysBoundary::classifyCells(dccrg::Dccrg<spatial_cell::SpatialCell,dccrg::Ca
          mpiGrid[cells[i]]->sysBoundaryFlag = sysboundarytype::DO_NOT_COMPUTE;
       }
    }
-   
+
    // The following is done so that everyone knows their neighbour's
    // layer flags.  This is needed for the correct use of the system
    // boundary local communication patterns.

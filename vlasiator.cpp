@@ -93,7 +93,7 @@ void addTimedBarrier(string name){
 }
 
 bool computeNewTimeStep(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,Real &newDt, bool &isChanged) {
-
+   
    phiprof::start("compute-timestep");
    //compute maximum time-step, this cannot be done at the first
    //step as the solvers compute the limits for each cell
@@ -133,7 +133,7 @@ bool computeNewTimeStep(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
                   = blockParams[blockLID*BlockParams::N_VELOCITY_BLOCK_PARAMS+BlockParams::VYCRD] 
                   + (i+HALF)*blockParams[blockLID*BlockParams::N_VELOCITY_BLOCK_PARAMS+BlockParams::DVY]
                   + EPS;
-                    const Real Vz 
+                const Real Vz 
                   = blockParams[blockLID*BlockParams::N_VELOCITY_BLOCK_PARAMS+BlockParams::VZCRD]
                   + (i+HALF)*blockParams[blockLID*BlockParams::N_VELOCITY_BLOCK_PARAMS+BlockParams::DVZ]
                   + EPS;
@@ -171,6 +171,22 @@ bool computeNewTimeStep(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
    creal meanVlasovCFL = 0.5*(P::vlasovSolverMaxCFL+ P::vlasovSolverMinCFL);
    creal meanFieldsCFL = 0.5*(P::fieldSolverMaxCFL+ P::fieldSolverMinCFL);
    Real subcycleDt;
+
+   // cout << dtMaxGlobal[0];
+   // cout << " ";
+   // cout << dtMaxGlobal[1];
+   // cout << " ";
+   // cout << dtMaxGlobal[2];
+   // cout << " ";
+   // cout << P::vlasovSolverMaxCFL;
+   // cout << " ";
+   // cout << P::vlasovSolverMinCFL;
+   // cout << " ";
+   // cout << P::fieldSolverMaxCFL;
+   // cout << " ";
+   // cout << P::fieldSolverMinCFL;
+   // cout << endl;
+   
    
    //reduce dt if it is too high for any of the three propagators, or too low for all propagators
    if(( P::dt > dtMaxGlobal[0] * P::vlasovSolverMaxCFL ||
@@ -180,6 +196,7 @@ bool computeNewTimeStep(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
         P::dt < dtMaxGlobal[1] * P::vlasovSolverMinCFL * P::maxSlAccelerationSubcycles &&
         P::dt < dtMaxGlobal[2] * P::fieldSolverMinCFL * P::maxFieldSolverSubcycles )
       ) {
+
       //new dt computed
       isChanged=true;
 
@@ -251,6 +268,9 @@ int main(int argn,char* args[]) {
    typedef Parameters P;
    Real newDt;
    bool dtIsChanged;
+   
+   const bool printCells = false;
+   const bool printSums  = false;
    
 // Init MPI:
    int required=MPI_THREAD_FUNNELED;
@@ -351,7 +371,7 @@ int main(int argn,char* args[]) {
    
    // Add AMR refinement criterias:
    amr_ref_criteria::addRefinementCriteria();
-   
+
    // Initialize grid.  After initializeGrid local cells have dist
    // functions, and B fields set. Cells have also been classified for
    // the various sys boundary conditions.  All remote cells have been
@@ -362,47 +382,53 @@ int main(int argn,char* args[]) {
    //dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry> mpiGrid;
    initializeGrid(argn,args,mpiGrid,sysBoundaries,*project);
    isSysBoundaryCondDynamic = sysBoundaries.isDynamic();
-   phiprof::stop("Init grid");
 
+   phiprof::stop("Init grid");
+   
    // Initialize data reduction operators. This should be done elsewhere in order to initialize 
    // user-defined operators:
    phiprof::start("Init DROs");
    DataReducer outputReducer, diagnosticReducer;
    initializeDataReducers(&outputReducer, &diagnosticReducer);
-   phiprof::stop("Init DROs");
+   phiprof::stop("Init DROs");  
    
    // Initialize simplified Fieldsolver grids.
    phiprof::start("Init fieldsolver grids");
-   const std::array<int,3> dimensions = {convert<int>(P::xcells_ini), convert<int>(P::ycells_ini), convert<int>(P::zcells_ini)};
+   const std::array<int,3> fsGridDimensions = {convert<int>(P::xcells_ini) * pow(2,P::amrMaxSpatialRefLevel),
+                                               convert<int>(P::ycells_ini) * pow(2,P::amrMaxSpatialRefLevel),
+                                               convert<int>(P::zcells_ini) * pow(2,P::amrMaxSpatialRefLevel)};
+
    std::array<bool,3> periodicity{mpiGrid.topology.is_periodic(0),
                                  mpiGrid.topology.is_periodic(1),
                                  mpiGrid.topology.is_periodic(2)};
+
    FsGridCouplingInformation gridCoupling;
-   FsGrid< std::array<Real, fsgrids::bfield::N_BFIELD>, 2> perBGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::bfield::N_BFIELD>, 2> perBDt2Grid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::efield::N_EFIELD>, 2> EGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::efield::N_EFIELD>, 2> EDt2Grid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::ehall::N_EHALL>, 2> EHallGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::egradpe::N_EGRADPE>, 2> EGradPeGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::moments::N_MOMENTS>, 2> momentsGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::moments::N_MOMENTS>, 2> momentsDt2Grid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::dperb::N_DPERB>, 2> dPerBGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::dmoments::N_DMOMENTS>, 2> dMomentsGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::bgbfield::N_BGB>, 2> BgBGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< std::array<Real, fsgrids::volfields::N_VOL>, 2> volGrid(dimensions, comm, periodicity,gridCoupling);
-   FsGrid< fsgrids::technical, 2> technicalGrid(dimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::bfield::N_BFIELD>, 2> perBGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::bfield::N_BFIELD>, 2> perBDt2Grid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::efield::N_EFIELD>, 2> EGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::efield::N_EFIELD>, 2> EDt2Grid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::ehall::N_EHALL>, 2> EHallGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::egradpe::N_EGRADPE>, 2> EGradPeGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::moments::N_MOMENTS>, 2> momentsGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::moments::N_MOMENTS>, 2> momentsDt2Grid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::dperb::N_DPERB>, 2> dPerBGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::dmoments::N_DMOMENTS>, 2> dMomentsGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::bgbfield::N_BGB>, 2> BgBGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< std::array<Real, fsgrids::volfields::N_VOL>, 2> volGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+   FsGrid< fsgrids::technical, 2> technicalGrid(fsGridDimensions, comm, periodicity,gridCoupling);
+
    // Set DX,DY and DZ
    // TODO: This is currently just taking the values from cell 1, and assuming them to be
    // constant throughout the simulation.
    perBGrid.DX = perBDt2Grid.DX = EGrid.DX = EDt2Grid.DX = EHallGrid.DX = EGradPeGrid.DX = momentsGrid.DX
       = momentsDt2Grid.DX = dPerBGrid.DX = dMomentsGrid.DX = BgBGrid.DX = volGrid.DX = technicalGrid.DX
-      = P::dx_ini;
+      = P::dx_ini * pow(2,-P::amrMaxSpatialRefLevel);
    perBGrid.DY = perBDt2Grid.DY = EGrid.DY = EDt2Grid.DY = EHallGrid.DY = EGradPeGrid.DY = momentsGrid.DY
       = momentsDt2Grid.DY = dPerBGrid.DY = dMomentsGrid.DY = BgBGrid.DY = volGrid.DY = technicalGrid.DY
-      = P::dy_ini;
+      = P::dy_ini * pow(2,-P::amrMaxSpatialRefLevel);
    perBGrid.DZ = perBDt2Grid.DZ = EGrid.DZ = EDt2Grid.DZ = EHallGrid.DZ = EGradPeGrid.DZ = momentsGrid.DZ
       = momentsDt2Grid.DZ = dPerBGrid.DZ = dMomentsGrid.DZ = BgBGrid.DZ = volGrid.DZ = technicalGrid.DZ
-      = P::dz_ini;
+      = P::dz_ini * pow(2,-P::amrMaxSpatialRefLevel);
    phiprof::stop("Init fieldsolver grids");
    phiprof::start("Initial fsgrid coupling");
    const std::vector<CellID>& cells = getLocalCells();
@@ -410,26 +436,39 @@ int main(int argn,char* args[]) {
    // Couple FSGrids to mpiGrid. Note that the coupling information is shared
    // between them.
    technicalGrid.setupForGridCoupling(cells.size());
+   
+   // Each dccrg cell may have to communicate with multiple fsgrid cells, if they are on a lower refinement level.
+   // Calculate the corresponding fsgrid ids for each dccrg cell and set coupling for each fsgrid id.
+   for(auto& dccrgId : cells) {
+      const auto fsgridIds = mapDccrgIdToFsGridGlobalID(mpiGrid, dccrgId);
 
-   // FSGrid cellIds are 0-based, whereas DCCRG cellIds are 1-based, beware
-   for(auto& i : cells) {
-      technicalGrid.setGridCoupling(i-1, myRank);
+      for (auto fsgridId : fsgridIds) {
+         
+         technicalGrid. setGridCoupling(fsgridId, myRank);
+      }
    }
-   technicalGrid.finishGridCoupling();
+   
+   technicalGrid. finishGridCoupling();
+
    phiprof::stop("Initial fsgrid coupling");
 
    // Transfer initial field configuration into the FsGrids
    feedFieldDataIntoFsGrid<fsgrids::N_BFIELD>(mpiGrid,cells,CellParams::PERBX,perBGrid);
+
    feedBgFieldsIntoFsGrid(mpiGrid,cells,BgBGrid);
    BgBGrid.updateGhostCells();
-   
+
    setupTechnicalFsGrid(mpiGrid, cells, technicalGrid);
    technicalGrid.updateGhostCells();
+
+   // if(myRank == MASTER_RANK) {
+   //    technicalGrid.debugOutput([](const fsgrids::technical& a)->void{cerr << a.sysBoundaryLayer << " ";});
+   // }
    
    // WARNING this means moments and dt2 moments are the same here.
    feedMomentsIntoFsGrid(mpiGrid, cells, momentsGrid,false);
    feedMomentsIntoFsGrid(mpiGrid, cells, momentsDt2Grid,false);
-   
+
    phiprof::start("Init field propagator");
    if (
       initializeFieldPropagator(
@@ -453,7 +492,7 @@ int main(int argn,char* args[]) {
       exit(1);
    }
    phiprof::stop("Init field propagator");
-   
+
    // Initialize Poisson solver (if used)
    if (P::propagatePotential == true) {
       phiprof::start("Init Poisson solver");
@@ -501,7 +540,7 @@ int main(int argn,char* args[]) {
    // These should be done by initializeFieldPropagator() if the propagation is turned off.
    getVolumeFieldsFromFsGrid(volGrid, mpiGrid, cells);
    phiprof::stop("getVolumeFieldsFromFsGrid");
-   
+
    // Save restart data
    if (P::writeInitialState) {
       phiprof::start("write-initial-state");
@@ -540,11 +579,12 @@ int main(int argn,char* args[]) {
 
       phiprof::stop("write-initial-state");
    }
-   
+
    if (P::isRestart == false) {
       //compute new dt
       phiprof::start("compute-dt");
       getFsGridMaxDt(technicalGrid, mpiGrid, cells);
+
       computeNewTimeStep(mpiGrid,newDt,dtIsChanged);
       if (P::dynamicTimestep == true && dtIsChanged == true) {
          // Only actually update the timestep if dynamicTimestep is on
@@ -566,12 +606,13 @@ int main(int argn,char* args[]) {
       phiprof::stop("propagate-velocity-space-dt/2");
 
    }
+   
    phiprof::stop("Initialization");
 
    // ***********************************
    // ***** INITIALIZATION COMPLETE *****
    // ***********************************
-   
+
    // Main simulation loop:
    if (myRank == MASTER_RANK) logFile << "(MAIN): Starting main simulation loop." << endl << writeVerbose;
    
@@ -610,11 +651,32 @@ int main(int argn,char* args[]) {
    double beforeTime = MPI_Wtime();
    double beforeSimulationTime=P::t_min;
    double beforeStep=P::tstep_min;
+
+   Real nSum = 0.0;
+   for(auto cell: cells) {
+      creal rho = mpiGrid[cell]->parameters[CellParams::RHOM_R];
+      creal dx = mpiGrid[cell]->parameters[CellParams::DX];
+      creal dy = mpiGrid[cell]->parameters[CellParams::DY];
+      creal dz = mpiGrid[cell]->parameters[CellParams::DZ];
+      creal x = mpiGrid[cell]->parameters[CellParams::XCRD];
+      creal y = mpiGrid[cell]->parameters[CellParams::YCRD];
+      creal z = mpiGrid[cell]->parameters[CellParams::ZCRD];
+      
+      nSum += rho*dx*dy*dz;
+      if(printCells) cout << "Cell " << cell << " rho = " << rho << " x: " << x << " y: " << y << " z: " << z << endl;
+   }
+   if(printSums) {
+      cout << "Rank " << myRank << ", Local sum = " << nSum << endl;   
+      Real globalSum = 0.0;
+      MPI_Reduce(&nSum, &globalSum, 1, MPI_DOUBLE, MPI_SUM, MASTER_RANK, MPI_COMM_WORLD);
+      MPI_Barrier(MPI_COMM_WORLD);
+      if(myRank == MASTER_RANK) cout << " Global sum = " << globalSum << endl;
+   }
    
    while(P::tstep <= P::tstep_max  &&
          P::t-P::dt <= P::t_max+DT_EPSILON &&
          wallTimeRestartCounter <= P::exitAfterRestarts) {
-      
+
       addTimedBarrier("barrier-loop-start");
       
       phiprof::start("IO");
@@ -625,7 +687,7 @@ int main(int argn,char* args[]) {
          checkExternalCommands();
       }
       phiprof::stop("checkExternalCommands");
-      
+
       //write out phiprof profiles and logs with a lower interval than normal
       //diagnostic (every 10 diagnostic intervals).
       phiprof::start("logfile-io");
@@ -654,7 +716,7 @@ int main(int argn,char* args[]) {
       }
       logFile << writeVerbose;
       phiprof::stop("logfile-io");
-      
+
 // Check whether diagnostic output has to be produced
       if (P::diagnosticInterval != 0 && P::tstep % P::diagnosticInterval == 0) {
          vector<string>::const_iterator it;
@@ -680,6 +742,7 @@ int main(int argn,char* args[]) {
          }
          phiprof::stop("diagnostic-io");
       }
+
       bool extractFsGridFields = true;
       // write system, loop through write classes
       for (uint i = 0; i < P::systemWriteTimeInterval.size(); i++) {
@@ -732,12 +795,12 @@ int main(int argn,char* args[]) {
             phiprof::stop("write-system");
          }
       }
-      
+
       // Reduce globalflags::bailingOut from all processes
       phiprof::start("Bailout-allreduce");
       MPI_Allreduce(&(globalflags::bailingOut), &(doBailout), 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
       phiprof::stop("Bailout-allreduce");
-      
+
       // Write restart data if needed
       // Combined with checking of additional load balancing to have only one collective call.
       phiprof::start("compute-is-restart-written-and-extra-LB");
@@ -803,7 +866,8 @@ int main(int argn,char* args[]) {
       
       //Re-loadbalance if needed
       //TODO - add LB measure and do LB if it exceeds threshold
-      if((P::tstep % P::rebalanceInterval == 0 && P::tstep > P::tstep_min) || overrideRebalanceNow == true) {
+      #warning Re-loadbalance has been disabled temporarily for amr debugging
+      if(((P::tstep % P::rebalanceInterval == 0 && P::tstep > P::tstep_min) || overrideRebalanceNow)) {
          logFile << "(LB): Start load balance, tstep = " << P::tstep << " t = " << P::t << endl << writeVerbose;
          balanceLoad(mpiGrid, sysBoundaries);
          addTimedBarrier("barrier-end-load-balance");
@@ -816,19 +880,33 @@ int main(int argn,char* args[]) {
 
          // Re-couple fsgrids to updated grid situation
          phiprof::start("fsgrid-recouple-after-lb");
-         const vector<CellID>& cells = getLocalCells();
-         technicalGrid.setupForGridCoupling(cells.size());
          
-         // FSGrid cellIds are 0-based, whereas DCCRG cellIds are 1-based, beware
-         for(auto& i : cells) {
-            technicalGrid.setGridCoupling(i-1, myRank);
+         const vector<CellID>& cells = getLocalCells();
+
+//          cout << "Reloadbalance: Local cells are: ";
+//          for(auto id : cells) cout << id << " ";
+//          cout << endl;
+         
+         technicalGrid. setupForGridCoupling(cells.size());
+         
+         // Each dccrg cell may have to communicate with multiple fsgrid cells, if they are on a lower refinement level.
+         // Calculate the corresponding fsgrid ids for each dccrg cell and set coupling for each fsgrid id.
+         for(auto& dccrgId : cells) {
+            const auto fsgridIds = mapDccrgIdToFsGridGlobalID(mpiGrid, dccrgId);
+            for (auto& fsgridId : fsgridIds) {
+               
+               technicalGrid. setGridCoupling(fsgridId, myRank);
+            }
          }
-         technicalGrid.finishGridCoupling();
+         // cout << endl;
+         
+         technicalGrid. finishGridCoupling();
+
          phiprof::stop("fsgrid-recouple-after-lb");
 
          overrideRebalanceNow = false;
       }
-
+      
       //get local cells
       const vector<CellID>& cells = getLocalCells();
 
@@ -892,11 +970,34 @@ int main(int argn,char* args[]) {
       }
       
       phiprof::start("Spatial-space");
+      
       if( P::propagateVlasovTranslation) {
          calculateSpatialTranslation(mpiGrid,P::dt);
       } else {
          calculateSpatialTranslation(mpiGrid,0.0);
       }
+
+      Real nSum = 0.0;
+      for(auto cell: cells) {
+         creal rho = mpiGrid[cell]->parameters[CellParams::RHOM_R];
+         creal dx = mpiGrid[cell]->parameters[CellParams::DX];
+         creal dy = mpiGrid[cell]->parameters[CellParams::DY];
+         creal dz = mpiGrid[cell]->parameters[CellParams::DZ];
+         creal x = mpiGrid[cell]->parameters[CellParams::XCRD];
+         creal y = mpiGrid[cell]->parameters[CellParams::YCRD];
+         creal z = mpiGrid[cell]->parameters[CellParams::ZCRD];
+         
+         nSum += rho*dx*dy*dz;
+         if(printCells) cout << "Cell " << cell << " rho = " << rho << " x: " << x << " y: " << y << " z: " << z << endl;
+      }
+      if(printSums) {
+         cout << "Rank " << myRank << ", Local sum = " << nSum << endl;
+         Real globalSum = 0.0;
+         MPI_Reduce(&nSum, &globalSum, 1, MPI_DOUBLE, MPI_SUM, MASTER_RANK, MPI_COMM_WORLD);
+         MPI_Barrier(MPI_COMM_WORLD);
+         if(printSums && myRank == MASTER_RANK) cout << " Global sum = " << globalSum << endl;
+      }
+      
       phiprof::stop("Spatial-space",computedCells,"Cells");
 
       phiprof::start("Compute interp moments");
@@ -912,8 +1013,8 @@ int main(int argn,char* args[]) {
          CellParams::P_33_DT2
       );
       phiprof::stop("Compute interp moments");
-      
-      // Apply boundary conditions
+
+      // Apply boundary conditions      
       if (P::propagateVlasovTranslation || P::propagateVlasovAcceleration ) {
          phiprof::start("Update system boundaries (Vlasov post-translation)");
          sysBoundaries.applySysBoundaryVlasovConditions(mpiGrid, P::t+0.5*P::dt); 
@@ -921,12 +1022,11 @@ int main(int argn,char* args[]) {
          addTimedBarrier("barrier-boundary-conditions");
       }
 
-      
       // Propagate fields forward in time by dt. This needs to be done before the
       // moments for t + dt are computed (field uses t and t+0.5dt)
       if (P::propagateField) {
          phiprof::start("Propagate Fields");
-         
+
          phiprof::start("fsgrid-coupling-in");
          // Copy moments over into the fsgrid.
          //setupTechnicalFsGrid(mpiGrid, cells, technicalGrid);
@@ -998,7 +1098,7 @@ int main(int argn,char* args[]) {
       phiprof::start("Project endTimeStep");
       project->hook(hook::END_OF_TIME_STEP, mpiGrid);
       phiprof::stop("Project endTimeStep");
-      
+
       // Check timestep
       if (P::dt < P::bailout_min_dt) {
          stringstream s;
@@ -1009,10 +1109,11 @@ int main(int argn,char* args[]) {
       P::meshRepartitioned = false;
       ++P::tstep;
       P::t += P::dt;
+
    }
 
    double after = MPI_Wtime();
-   
+
    phiprof::stop("Simulation");
    phiprof::start("Finalization");
    if (P::propagateField ) { 

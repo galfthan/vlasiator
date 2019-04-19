@@ -80,7 +80,7 @@ bool updateLocalIds(  dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGr
    }
    //Update the local ids (let the other processes know they've been updated)
    SpatialCell::set_mpi_transfer_type(Transfer::CELL_IOLOCALCELLID);
-   mpiGrid.update_copies_of_remote_neighbors(NEAREST_NEIGHBORHOOD_ID);
+   mpiGrid.update_copies_of_remote_neighbors(FULL_NEIGHBORHOOD_ID);
 
    return true;
 }
@@ -628,7 +628,11 @@ bool writeZoneGlobalIdNumbers( const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_G
    //The name of the mesh (user input -- should be "SpatialGrid")
    xmlAttributes["name"] = meshName;
    //A mandatory 'type' -- just something visit hopefully understands, because I dont (some of us do!) :)
-   xmlAttributes["type"] = "multi_ucd";
+   xmlAttributes["type"] = vlsv::mesh::STRING_UCD_AMR;
+   char refLevelString[] = "0";
+   // Ultra-dirty number-to-string
+   refLevelString[0] += P::amrMaxSpatialRefLevel;
+   xmlAttributes["max_refinement_level"] = refLevelString;
 
    //Set periodicity:
    if( mpiGrid.topology.is_periodic( 0 ) ) { xmlAttributes["xperiodic"] = "yes"; } else { xmlAttributes["xperiodic"] = "no"; }
@@ -1124,6 +1128,10 @@ bool writeRestart(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
    
    //Write zone global id numbers:
    if( writeZoneGlobalIdNumbers( mpiGrid, vlsvWriter, meshName, local_cells, ghost_cells ) == false ) return false;
+
+   //Write domain sizes:
+   if( writeDomainSizes( vlsvWriter, meshName, local_cells.size(), ghost_cells.size() ) == false ) return false;
+
    phiprof::stop("metadataIO");
    phiprof::start("reduceddataIO");   
    //write out DROs we need for restarts
